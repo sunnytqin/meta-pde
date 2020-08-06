@@ -3,12 +3,12 @@ import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
 
-from field import NeuralField
+from ..nets.field import NeuralField
 
 from functools import partial
 import flax
 from flax import nn
-from timer import Timer
+from ..util.timer import Timer
 
 from .metamaterial_fenics import solve_fenics, make_fenics
 from .metamaterial_common import *

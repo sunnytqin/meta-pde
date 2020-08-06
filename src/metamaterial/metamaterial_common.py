@@ -4,6 +4,10 @@ import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
 
+from functools import partial
+import flax
+from flax import nn
+from ..util.timer import Timer
 
 def sample_points_on_boundary(key, n, geo_params=None):
     if geo_params is not None:

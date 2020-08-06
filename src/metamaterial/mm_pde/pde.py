@@ -1,6 +1,5 @@
 """Base class for PDEs"""
 import fenics as fa
-from .solver import Solver
 
 
 class PDE(object):

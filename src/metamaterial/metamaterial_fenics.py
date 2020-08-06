@@ -12,7 +12,7 @@ from functools import partial
 
 import matplotlib.pyplot as plt
 
-from timer import Timer
+from ..util.timer import Timer
 
 import pdb
 
