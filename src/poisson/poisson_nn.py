@@ -3,7 +3,7 @@ import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
 
-from .nets.field import NeuralPotential, vmap_laplace_operator
+from ..nets.field import NeuralPotential, vmap_laplace_operator
 
 from functools import partial
 import flax
