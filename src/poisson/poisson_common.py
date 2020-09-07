@@ -2,6 +2,7 @@ import jax
 import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
+from ..nets.field import vmap_laplace_operator
 
 from functools import partial
 import flax
@@ -9,6 +10,32 @@ from flax import nn
 
 import matplotlib.pyplot as plt
 import pdb
+
+
+def plot(model, grid, source_params, bc_params, geo_params=(0.0, 0.0)):
+    c1, c2 = geo_params
+    potentials = model(grid)
+    potentials = npo.array(potentials)
+    thetas = np.arctan2(grid[:, 1], grid[:, 0])
+    r0s = 1.0 + c1 * np.cos(4 * thetas) + c2 * np.cos(8 * thetas)
+    potentials[npo.linalg.norm(grid, axis=1) > r0s] = 0.0
+    potentials = potentials.reshape(101, 101)
+    plt.imshow(potentials)
+    plt.colorbar()
+
+
+def loss_fn(
+    points_on_boundary, points_in_domain, potential_fn, source_params, bc_params
+):
+    err_on_boundary = vmap_boundary_conditions(points_on_boundary, bc_params).reshape(
+        -1, 1
+    ) - potential_fn(points_on_boundary).reshape(-1, 1)
+    loss_on_boundary = np.mean(err_on_boundary ** 2)
+    err_in_domain = vmap_laplace_operator(points_in_domain, potential_fn).reshape(
+        -1, 1
+    ) - vmap_source(points_in_domain, source_params).reshape(-1, 1)
+    loss_in_domain = np.mean(err_in_domain ** 2)
+    return loss_on_boundary, loss_in_domain
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -75,10 +102,10 @@ def boundary_conditions(r, x):
         theta = np.arctan2(x[1], x[0])
         return (
             r[0]
-            + r[1]/4 * np.cos(theta)
-            + r[2]/4 * np.sin(theta)
-            + r[3]/4 * np.cos(2 * theta)
-            + r[4]/4 * np.sin(2 * theta)
+            + r[1] / 4 * np.cos(theta)
+            + r[2] / 4 * np.sin(theta)
+            + r[3] / 4 * np.cos(2 * theta)
+            + r[4] / 4 * np.sin(2 * theta)
         )
 
 
@@ -92,8 +119,8 @@ def source(r, x):
     else:
         result = np.array([0.0])
         for n in range(r.shape[0]):
-            result += r[n, 2] * 1e2 * np.exp(
-                -((x[0] - r[n, 0]) ** 2 + (x[1] - r[n, 1]) ** 2)
+            result += (
+                r[n, 2] * 1e2 * np.exp(-((x[0] - r[n, 0]) ** 2 + (x[1] - r[n, 1]) ** 2))
             )
         return result
 

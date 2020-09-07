@@ -13,13 +13,15 @@ import pdb
 
 def siren_init(key, shape, dtype=np.float32):
     fan_in = shape[0]
-    return jax.random.uniform(key, shape, dtype,
-                              -np.sqrt(6./fan_in)/30., np.sqrt(6./fan_in)/30.)
+    return jax.random.uniform(
+        key, shape, dtype, -np.sqrt(6.0 / fan_in) / 30.0, np.sqrt(6.0 / fan_in) / 30.0
+    )
+
 
 def first_layer_siren_init(key, shape, dtype=np.float32):
     fan_in = shape[0]
-    return jax.random.uniform(key, shape, dtype,
-                              -1./fan_in, 1./fan_in)
+    return jax.random.uniform(key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in)
+
 
 # @jax.jit
 def vmap_laplace_operator(x, potential_fn):
@@ -51,9 +53,11 @@ def fourier_features(x, n_features):
     assert len(x.shape) == 2
     x = x.reshape(x.shape[0], x.shape[1], 1)
     pows = np.arange(n_features).reshape(1, 1, -1)
-    sins = sins = np.sin(2 ** pows * x) / 2**pows  # * 2 * np.pi)
-    coss = coss = np.cos(2 ** pows * x) / 2**pows  # * 2 * np.pi)
-    return np.concatenate([x, sins, coss], axis=-1).reshape(x.shape[0], -1) # / n_features
+    sins = sins = np.sin(2 ** pows * x) / 2 ** pows  # * 2 * np.pi)
+    coss = coss = np.cos(2 ** pows * x) / 2 ** pows  # * 2 * np.pi)
+    return np.concatenate([x, sins, coss], axis=-1).reshape(
+        x.shape[0], -1
+    )  # / n_features
 
 
 def whiten(x, mean, std):
@@ -72,34 +76,36 @@ def dewhiten(y, mean, std):
     return y
 
 
-def nf_apply(out_dim,
-             x,
-             sizes,
-             dense_args=(),
-             nonlinearity=nn.relu,
-             mean_x=None,
-             std_x=None,
-             mean_y=None,
-             std_y=None,
-             n_fourier=None,
-    ):
+def nf_apply(
+    out_dim,
+    x,
+    sizes,
+    dense_args=(),
+    nonlinearity=nn.relu,
+    mean_x=None,
+    std_x=None,
+    mean_y=None,
+    std_y=None,
+    n_fourier=None,
+):
+    if nonlinearity == np.sin:
+        kernel_init = siren_init
+        first_init = siren_init
+        assert n_fourier is None
+    else:
+        kernel_init = flax.nn.initializers.lecun_normal()
+        first_init = kernel_init
+    x = whiten(x, mean_x, std_x)
+    if n_fourier is not None:
+        x = fourier_features(x, n_fourier)
+    for i, size in enumerate(sizes):
+        a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
         if nonlinearity == np.sin:
-            kernel_init = siren_init
-            first_init = siren_init
-            assert n_fourier is None
-        else:
-            kernel_init = flax.nn.initializers.lecun_normal()
-            first_init = kernel_init
-        x = whiten(x, mean_x, std_x)
-        if n_fourier is not None:
-            x = fourier_features(x, n_fourier)
-        for i, size in enumerate(sizes):
-            a = flax.nn.Dense(x, size, kernel_init=first_init if i==0 else kernel_init)
-            if nonlinearity == np.sin:
-                a = a * 30.  # omega0 in siren
-            x = nonlinearity(a)
-        out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init)
-        return dewhiten(out, mean_y, std_y)
+            a = a * 30.0  # omega0 in siren
+        x = nonlinearity(a)
+    out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init)
+    return dewhiten(out, mean_y, std_y)
+
 
 class NeuralField2d(nn.Module):
     def apply(
@@ -114,16 +120,19 @@ class NeuralField2d(nn.Module):
         std_y=None,
         n_fourier=None,
     ):
-        return nf_apply(x.shape[-1],
-                        x,
-                        sizes,
-                        dense_args,
-                        nonlinearity,
-                        mean_x,
-                        std_x,
-                        mean_y,
-                        std_y,
-                        n_fourier)
+        return nf_apply(
+            x.shape[-1],
+            x,
+            sizes,
+            dense_args,
+            nonlinearity,
+            mean_x,
+            std_x,
+            mean_y,
+            std_y,
+            n_fourier,
+        )
+
 
 NeuralField = NeuralField2d
 
@@ -151,7 +160,8 @@ class NeuralField1d(nn.Module):
             std_x,
             mean_y,
             std_y,
-            n_fourier)
+            n_fourier,
+        )
 
 
 NeuralPotential = NeuralField1d

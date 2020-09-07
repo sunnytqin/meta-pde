@@ -159,9 +159,11 @@ def solve_recurse(args, mm, bc_V, iter, guess=None):
         u = mm.solve_problem(args, boundary_fn=bc_V, initial_guess=guess)
         return u
     except Exception as e:
-        print("failed trying iter {} with relax {} max_newton {}".format(
-            iter, args.relaxation_parameter, args.max_newton_iter
-        ))
+        print(
+            "failed trying iter {} with relax {} max_newton {}".format(
+                iter, args.relaxation_parameter, args.max_newton_iter
+            )
+        )
         if iter > 50:
             raise (e)
         args = copy.deepcopy(args)

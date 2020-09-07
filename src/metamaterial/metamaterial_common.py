@@ -1,4 +1,3 @@
-
 import jax
 import jax.numpy as np
 import numpy as npo
@@ -8,6 +7,154 @@ from functools import partial
 import flax
 from flax import nn
 from ..util.timer import Timer
+
+
+# Deformation gradient
+def defgrad(u):
+    """
+    Inputs:
+        u: fn mapping [2]  -> [2]
+    Outputs:
+        F: fn mapping [2] -> [2, 2]
+    """
+
+    def _dg(x):
+        x = x.reshape(2)
+        dudx = jax.jacfwd(lambda x: u(x).reshape(2))(x)
+        # pdb.set_trace()
+        assert dudx.shape[0] == 2 and dudx.shape[1] == 2
+        return dudx + np.eye(2)
+
+    return _dg
+
+
+def neo_hookean_energy(u, source_params, x):
+    """
+    Inputs:
+        u: fn mapping [n, 2] or [2] -> [n, 2] or [2]
+        young_mod: scalar
+        poisson_ratio: scalar
+
+    Outputs:
+        energy: [n, 1] or [1]
+    """
+    young_mod, poisson_ratio = source_params
+    if poisson_ratio >= 0.5:
+        raise ValueError(
+            "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
+                poisson_ratio
+            )
+        )
+    shear_mod = young_mod / (2 * (1 + poisson_ratio))
+    bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
+
+    x = x.reshape(2)
+    F = defgrad(u)(x)
+    J = np.linalg.det(F)
+    rcg = np.matmul(F.transpose(), F)  # right cauchy green
+    Jinv = 1.0 / (J + 1e-14)
+    I1 = np.trace(rcg)  # first invariant
+
+    energy = (shear_mod / 2) * (Jinv * I1 - 2) + (bulk_mod / 2) * (J - 1) ** 2
+
+    return energy
+
+
+def inv2d(A):
+    assert len(A.shape) == 2 and A.shape[0] == 2 and A.shape[1] == 2
+    return (
+        1.0
+        / (A[0, 0] * A[1, 1] - A[0, 1] * A[1, 0])
+        * np.array([[A[1, 1], A[1, 0]], [A[0, 1], A[0, 0]]])
+    )
+
+
+def first_pk_stress(u, source_params, x):
+
+    young_mod, poisson_ratio = source_params
+    if poisson_ratio >= 0.5:
+        raise ValueError(
+            "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
+                poisson_ratio
+            )
+        )
+    shear_mod = young_mod / (2 * (1 + poisson_ratio))
+    bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
+
+    x = x.reshape(2)
+    F = defgrad(u)(x)
+    J = np.linalg.det(F)
+    rcg = np.matmul(F.transpose(), F)  # right cauchy green
+    Jinv = 1.0 / (J + 1e-14)
+    I1 = np.trace(rcg)  # first invariant
+
+    FinvT = inv2d(F).transpose()
+    first_pk_stress = (
+        Jinv * shear_mod * (F - (1 / 2) * I1 * FinvT) + J * bulk_mod * (J - 1) * FinvT
+    )
+    return first_pk_stress
+
+
+def second_pk_stress(u, source_params, x):
+
+    young_mod, poisson_ratio = source_params
+    if poisson_ratio >= 0.5:
+        raise ValueError(
+            "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
+                poisson_ratio
+            )
+        )
+    shear_mod = young_mod / (2 * (1 + poisson_ratio))
+    bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
+
+    x = x.reshape(2)
+    F = defgrad(u)(x)
+    J = np.linalg.det(F)
+    rcg = np.matmul(F.transpose(), F)  # right cauchy green
+    Jinv = 1.0 / (J + 1e-14)
+    I1 = np.trace(rcg)  # first invariant
+
+    Finv = inv2d(F)
+    first_pk_stress = (
+        Jinv * shear_mod * (F - (1 / 2) * I1 * Finv.transpose())
+        + J * bulk_mod * (J - 1) * Finv.transpose()
+    )
+    return np.matmul(Finv, first_pk_stress)
+
+
+def vmap_nhe(x, u, source_params):
+    return vmap(partial(neo_hookean_energy, u, source_params))(x).reshape(-1, 1)
+
+
+def interior_bc(geo_params, source_params, u, x):
+    """This loss returns <dEnergy/dx, N> where N is the normal to the boundary.
+    It is a Nietsche boundary condition.
+    """
+    c1, c2 = geo_params
+    assert x.shape[0] == 2 and len(x.shape) == 1
+
+    theta = np.arctan2(x[1], x[0])
+
+    def get_xy(theta):
+        rval = r(theta, c1, c2)
+        return np.array([rval * np.cos(theta), rval * np.sin(theta)])
+
+    tangent = jax.jacfwd(get_xy)(theta)
+
+    tangent = tangent.reshape(2)
+
+    # <[a, b], [-b, a]> = ab - ba = 0
+    normal = np.array([-tangent[1], tangent[0]])
+    normal = (normal / np.linalg.norm(normal)).reshape(2, 1)
+
+    # Non-stationary dispacements, i.e. du_dx = 0
+    pk = first_pk_stress(u, source_params, x)  # dForce / dx
+    assert len(pk.shape) == 2 and pk.shape[0] == 2 and pk.shape[1] == 2
+
+    pk_dot_n = np.matmul(pk, normal)
+
+    return np.sum(pk_dot_n ** 2)
+
 
 def sample_points_on_boundary(key, n, geo_params=None):
     if geo_params is not None:
@@ -61,8 +208,9 @@ def sample_points_in_domain_rejection(key, n, geo_params=None):
 
         k1, k2 = jax.random.split(key, 2)
         # Add some random, jittering by the size of the linspace interval
-        xys = xys + jax.random.uniform(k1, shape=(len(xys), 2,),
-                                       minval=0., maxval=xg[1]-xg[0])
+        xys = xys + jax.random.uniform(
+            k1, shape=(len(xys), 2,), minval=0.0, maxval=xg[1] - xg[0]
+        )
         xys = jax.random.shuffle(k2, xys)[:n]
 
         return xys
@@ -85,7 +233,7 @@ def sample_points_in_domain_rejection(key, n, geo_params=None):
         pore_rs = r(thetas, c1, c2).reshape(-1)
 
         new_accepted = rvals > pore_rs
-        return (i+1, new_xs, new_accepted, new_key)
+        return (i + 1, new_xs, new_accepted, new_key)
 
     init_xs = np.nan * np.ones((n, 2))
     init_accepted = jax.lax.full_like(np.ones(n), False, np.bool_, (n,))
@@ -94,9 +242,7 @@ def sample_points_in_domain_rejection(key, n, geo_params=None):
     return xs
 
 
-
 sample_points_in_domain = sample_points_in_domain_rejection
-
 
 
 def sample_params(key, args):
@@ -106,7 +252,7 @@ def sample_params(key, args):
     else:
         bc_params = None
     if args.vary_geometry:
-        geo_params = jax.random.uniform(k2, minval=-0.2, maxval=0.2, shape=(2,))
+        geo_params = jax.random.uniform(k2, minval=-0.1, maxval=0.1, shape=(2,))
     else:
         geo_params = np.array([0.0]), np.array([0.0])
     if args.vary_source:
@@ -122,7 +268,6 @@ def sample_params(key, args):
 def r(theta, c1, c2, porosity=0.5):
     r0 = np.sqrt(2 * porosity) / np.sqrt(np.pi * (2 + c1 ** 2 + c2 ** 2))
     return r0 * (1 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta))
-
 
 
 def boundary_conditions(r, x):
@@ -149,7 +294,6 @@ def boundary_conditions(r, x):
                 + r[1, 4] * np.sin(2 * theta),
             ]
         )
-
 
 
 def vmap_boundary_conditions(points_on_boundary, bc_params):
