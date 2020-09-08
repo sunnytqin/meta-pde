@@ -331,7 +331,7 @@ for step in range(args.outer_steps):
             ground_truth_source, ground_truth_bc, ground_truth_geo, args
         )
         if args.expt_name is not None:
-            plt.savefig(os.path.join(args.out_dir, expt_name +
+            plt.savefig(os.path.join(args.out_dir, args.expt_name +
                                      "_viz_step_{}.png".format(step)))
         else:
             plt.show()
@@ -346,7 +346,7 @@ compare_plots_with_ground_truth(
     ground_truth_source, ground_truth_bc, ground_truth_geo, args
 )
 if args.expt_name is not None:
-    plt.savefig(os.path.join(args.out_dir, expt_name +
+    plt.savefig(os.path.join(args.out_dir, args.expt_name +
                              "_viz_final.png"))
 else:
     plt.show()

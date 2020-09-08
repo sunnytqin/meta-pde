@@ -200,8 +200,9 @@ if __name__ == '__main__':
                 geo_params,
             )
             if args.expt_name is not None:
-                plt.savefig(os.path.join(args.out_dir, expt_name +
-                                         "_viz_step_{}.png".format(step)))
+                plt.savefig(os.path.join(
+                    args.out_dir, args.expt_name +
+                    "_viz_step_{}.png".format(step)))
             else:
                 plt.show()
 
@@ -232,6 +233,6 @@ if __name__ == '__main__':
     )
     plt.title('pred-true')
     if args.expt_name is not None:
-        plt.savefig(os.path.join(args.out_dir, expt_name + "_viz_final.png"))
+        plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))
     else:
         plt.show()
