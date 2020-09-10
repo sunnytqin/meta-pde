@@ -1,4 +1,4 @@
-import jax
+DTYPEimport jax
 import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
@@ -7,6 +7,31 @@ from functools import partial
 import flax
 from flax import nn
 from ..util.timer import Timer
+
+
+DTYPE = np.float16
+
+
+def interior_bc_loss_fn(points_on_interior_boundary, u, geo_params, source_params):
+    # pdb.set_trace()
+    lossval = vmap(partial(interior_bc, geo_params, source_params, u))(
+        points_on_interior_boundary
+    ).mean()
+    return lossval
+
+
+def boundary_loss_fn(points_on_boundary, field_fn, bc_params):
+    err_on_boundary = vmap_boundary_conditions(points_on_boundary, bc_params).reshape(
+        -1, 2
+    ) - field_fn(points_on_boundary).reshape(-1, 2)
+    loss_on_boundary = (err_on_boundary ** 2).mean()
+    return loss_on_boundary
+
+
+def domain_loss_fn(points_in_domain, field_fn, source_params):
+    err_in_domain = vmap_nhe(points_in_domain, field_fn, source_params).reshape(-1, 1)
+    loss_in_domain = (err_in_domain ** 2).mean()
+    return loss_in_domain
 
 
 # Deformation gradient
@@ -39,12 +64,12 @@ def neo_hookean_energy(u, source_params, x):
         energy: [n, 1] or [1]
     """
     young_mod, poisson_ratio = source_params
-    if poisson_ratio >= 0.5:
-        raise ValueError(
-            "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
-                poisson_ratio
-            )
-        )
+    #if poisson_ratio >= 0.5:
+    #    raise ValueError(
+    #        "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
+    #            poisson_ratio
+    #        )
+    #    )
     shear_mod = young_mod / (2 * (1 + poisson_ratio))
     bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
 
@@ -72,12 +97,12 @@ def inv2d(A):
 def first_pk_stress(u, source_params, x):
 
     young_mod, poisson_ratio = source_params
-    if poisson_ratio >= 0.5:
-        raise ValueError(
-            "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
-                poisson_ratio
-            )
-        )
+    #if poisson_ratio >= 0.5:
+    #    raise ValueError(
+    #        "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
+    #            poisson_ratio
+    #        )
+    #    )
     shear_mod = young_mod / (2 * (1 + poisson_ratio))
     bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
 
@@ -98,12 +123,12 @@ def first_pk_stress(u, source_params, x):
 def second_pk_stress(u, source_params, x):
 
     young_mod, poisson_ratio = source_params
-    if poisson_ratio >= 0.5:
-        raise ValueError(
-            "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
-                poisson_ratio
-            )
-        )
+    #if poisson_ratio >= 0.5:
+    #    raise ValueError(
+    #        "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
+    #            poisson_ratio
+    #        )
+    #    )
     shear_mod = young_mod / (2 * (1 + poisson_ratio))
     bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
 
@@ -160,10 +185,10 @@ def sample_points_on_boundary(key, n, geo_params=None):
     if geo_params is not None:
         c1, c2 = geo_params
     else:
-        c1, c2 = (0.0, 0.0)
-    theta = np.linspace(0.0, 2 * np.pi, n)
+        c1, c2 = np.zeros(2, dtype=DTYPE)
+    theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
     theta = theta + jax.random.uniform(
-        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,)
+        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
     )
     theta_in_pm_pidiv4 = np.mod((theta + np.pi / 4), np.pi / 2) - np.pi / 4
 
@@ -179,10 +204,10 @@ def sample_points_on_interior_boundary(key, n, geo_params=None):
     if geo_params is not None:
         c1, c2 = geo_params
     else:
-        c1, c2 = (0.0, 0.0)
-    theta = np.linspace(0.0, 2 * np.pi, n)
+        c1, c2 = np.zeros(2, dtype=DTYPE)
+    theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
     theta = theta + jax.random.uniform(
-        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,)
+        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
     )
     rs = r(theta, c1, c2)
     x = rs * np.cos(theta)
@@ -194,24 +219,24 @@ def sample_points_in_domain_rejection(key, n, geo_params=None):
     if geo_params is not None:
         c1, c2 = geo_params
     else:
-        c1, c2 = (0.0, 0.0)
+        c1, c2 = np.zeros(2, dtype=DTYPE)
 
     def sample_grid(key):
         # We generate a semi-randomized uniform grid
         # Initialize the grid
         nsqrt = (np.ceil(np.sqrt(n))).astype(int)
 
-        xg = np.linspace(-1, 1, nsqrt, endpoint=False)
-        yg = np.linspace(-1, 1, nsqrt, endpoint=False)
+        xg = np.linspace(-1, 1, nsqrt, endpoint=False, dtype=DTYPE)
+        yg = np.linspace(-1, 1, nsqrt, endpoint=False, dtype=DTYPE)
         # Cartesian product
         xys = np.transpose(np.array([np.tile(xg, len(yg)), np.repeat(yg, len(xg))]))
 
         k1, k2 = jax.random.split(key, 2)
         # Add some random, jittering by the size of the linspace interval
         xys = xys + jax.random.uniform(
-            k1, shape=(len(xys), 2,), minval=0.0, maxval=xg[1] - xg[0]
+            k1, shape=(len(xys), 2,), minval=0.0, maxval=xg[1] - xg[0], dtype=DTYPE
         )
-        xys = jax.random.shuffle(k2, xys)[:n]
+        xys = jax.random.permutation(k2, xys)[:n]
 
         return xys
 
@@ -235,7 +260,7 @@ def sample_points_in_domain_rejection(key, n, geo_params=None):
         new_accepted = rvals > pore_rs
         return (i + 1, new_xs, new_accepted, new_key)
 
-    init_xs = np.nan * np.ones((n, 2))
+    init_xs = np.nan * np.ones((n, 2), dtype=DTYPE)
     init_accepted = jax.lax.full_like(np.ones(n), False, np.bool_, (n,))
     xs = jax.lax.while_loop(cond_fn, body_fn, (0, init_xs, init_accepted, key))[1]
 
@@ -248,21 +273,24 @@ sample_points_in_domain = sample_points_in_domain_rejection
 def sample_params(key, args):
     k1, k2, k3, k4 = jax.random.split(key, 4)
     if args.vary_bc:
-        bc_params = args.bc_scale * jax.random.normal(k1, shape=(2, 5,))
+        bc_params = args.bc_scale * jax.random.normal(k1, shape=(2, 5,),
+                                                      dtype=DTYPE)
     else:
-        bc_params = None
+        bc_params = np.zeros([2, 5], dtype=DTYPE)
     if args.vary_geometry:
-        geo_params = jax.random.uniform(k2, minval=-0.1, maxval=0.1, shape=(2,))
+        geo_params = jax.random.uniform(k2, minval=-0.03, maxval=0.03, shape=(2,),
+                                        dtype=DTYPE)
     else:
-        geo_params = np.array([0.0]), np.array([0.0])
+        geo_params = np.zeros(2, dtype=DTYPE)
     if args.vary_source:
-        young_mod = jax.random.uniform(k3, minval=0.7, maxval=2.0)
-        poisson_ratio = jax.random.uniform(k4, minval=0.4, maxval=0.49)
+        young_mod = jax.random.uniform(k3, minval=0.7, maxval=2.0, dtype=DTYPE)
+        poisson_ratio = jax.random.uniform(k4, minval=0.4, maxval=0.49,
+                                           dtype=DTYPE)
     else:
         young_mod = 1.0
         poisson_ratio = 0.49
 
-    return (young_mod, poisson_ratio), bc_params, geo_params
+    return np.array([young_mod, poisson_ratio]), bc_params, geo_params
 
 
 def r(theta, c1, c2, porosity=0.5):
@@ -276,7 +304,7 @@ def boundary_conditions(r, x):
     """
 
     if r is None:
-        return np.array([0.0, 0.0])
+        return np.array([0.0, 0.0], dtype=np.float16)
     else:
         # pdb.set_trace()
         theta = np.arctan2(x[1], x[0])

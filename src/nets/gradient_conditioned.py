@@ -2,7 +2,7 @@ import jax
 import jax.numpy as np
 from jax import grad, jit, vmap
 
-from .field import fourier_features
+from .field import fourier_features, siren_init, first_layer_siren_init
 
 from functools import partial
 
@@ -25,7 +25,7 @@ class GradientConditionedModel(nn.Module):
     def apply(
         self,
         x,
-        inner_loss_params,
+        inner_loss_kwargs,
         inner_steps,
         inner_loss,
         base_args,
@@ -39,7 +39,7 @@ class GradientConditionedModel(nn.Module):
         def param_loss(params):
             return inner_loss(
                 partial(self.base_forward, params=params, n_fourier=n_fourier),
-                **inner_loss_params
+                **inner_loss_kwargs
             )
 
         scale_loss = lambda scale: lambda params: scale * param_loss(params)
@@ -82,12 +82,19 @@ class GradientConditionedField(GradientConditionedModel):
         sizes,
         input_dim,
         output_dim,
-        nonlinearity=nn.softplus,
-        kernel_init=flax.nn.initializers.kaiming_normal(),
+        nonlinearity=nn.swish,
+        kernel_init=flax.nn.initializers.variance_scaling(
+            2.0, "fan_in", "truncated_normal"
+        ),
         bias_init=flax.nn.initializers.zeros,
         n_fourier=None,
     ):
         self.nonlinearity = nonlinearity
+        if self.nonlinearity == np.sin:
+            kernel_init = siren_init
+            first_init = first_layer_siren_init
+        else:
+            first_init = kernel_init
         self.input_dim = input_dim
         self.output_dim = output_dim
         if n_fourier is not None:
@@ -106,7 +113,8 @@ class GradientConditionedField(GradientConditionedModel):
         for i in range(len(self.sizes) - 1):
             weights.append(
                 self.param(
-                    "W" + str(i), (self.sizes[i], self.sizes[i + 1]), kernel_init
+                    "W" + str(i), (self.sizes[i], self.sizes[i + 1]),
+                    first_init if i==0 else kernel_init
                 )
             )
             biases.append(self.param("b" + str(i), (1, self.sizes[i + 1]), bias_init))
@@ -124,6 +132,8 @@ class GradientConditionedField(GradientConditionedModel):
         a = x
         for W, b in zip(params["weights"], params["biases"]):
             x = np.dot(a, W) + b
+            if self.nonlinearity == np.sin:
+                a = a * 30.
             a = self.nonlinearity(x)
         """
         bout = x[:, :self.output_dim].reshape(-1, self.output_dim, 1)

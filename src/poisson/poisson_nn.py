@@ -81,7 +81,7 @@ if __name__ == '__main__':
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+    _, init_params = Field.init_by_shape(subkey, [((1, 2), DTYPE)])
     model = flax.nn.Model(Field, init_params)
 
     optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(model)
@@ -91,7 +91,8 @@ if __name__ == '__main__':
     for i in range(101):
         for j in range(101):
             grid[i, j] += [i * 1.0 / 100, j * 1.0 / 100]
-    grid = np.array(grid).reshape(-1, 2) * 2 - np.array([[1.0, 1.0]])
+    grid = np.array(grid).astype(DTYPE).reshape(-1, 2) * 2 - np.array(
+        [[1.0, 1.0]]).astype(DTYPE)
 
 
     @jax.jit
@@ -224,7 +225,7 @@ if __name__ == '__main__':
     plt.title('truth')
     plt.subplot(3, 1, 3)
     plot(
-        lambda xs: optimizer.target(xs).reshape(-1, 1)
+        lambda xs: optimizer.target(xs).reshape(-1, 1).astype(np.float32)
         - np.array([ground_truth(x) for x in xs]).reshape(-1, 1),
         grid,
         source_params,

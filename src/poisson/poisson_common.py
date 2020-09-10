@@ -12,6 +12,9 @@ import matplotlib.pyplot as plt
 import pdb
 
 
+DTYPE = np.float16
+
+
 def plot(model, grid, source_params, bc_params, geo_params=(0.0, 0.0)):
     c1, c2 = geo_params
     potentials = model(grid)
@@ -42,15 +45,16 @@ def loss_fn(
 def sample_params(key, args):
     k1, k2, k3 = jax.random.split(key, 3)
     if args.vary_source:
-        source_params = jax.random.normal(k1, shape=(2, 3,))
+        source_params = jax.random.normal(k1, shape=(2, 3,), dtype=DTYPE)
     else:
         source_params = None
     if args.vary_bc:
-        bc_params = jax.random.normal(k2, shape=(5,))
+        bc_params = jax.random.normal(k2, shape=(5,), dtype=DTYPE)
     else:
         bc_params = None
     if args.vary_geometry:
-        geo_params = jax.random.uniform(k3, minval=-0.2, maxval=0.2, shape=(2,))
+        geo_params = jax.random.uniform(k3, minval=-0.2, maxval=0.2, shape=(2,),
+                                        dtype=DTYPE)
     else:
         geo_params = np.array([0.0]), np.array([0.0])
 
@@ -61,10 +65,10 @@ def sample_points_on_boundary(key, n, geo_params=None):
     if geo_params is not None:
         c1, c2 = geo_params
     else:
-        c1, c2 = (0.0, 0.0)
-    theta = np.linspace(0.0, 2 * np.pi, n)
+        c1, c2 = np.zeros(2, dtype=DTYPE)
+    theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
     theta = theta + jax.random.uniform(
-        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,)
+        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
     )
     r0 = 1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta)
     x = r0 * np.cos(theta)
@@ -76,16 +80,17 @@ def sample_points_in_domain(key, n, geo_params=None):
     if geo_params is not None:
         c1, c2 = geo_params
     else:
-        c1, c2 = (0.0, 0.0)
+        c1, c2 = np.zeros(2, dtype=DTYPE)
     key1, key2, key3 = jax.random.split(key, 3)
-    theta = np.linspace(0.0, 2 * np.pi, n)
+    theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
     theta = theta + jax.random.uniform(
-        key1, minval=0.0, maxval=(2 * np.pi / n), shape=(n,)
+        key1, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
     )
     r0 = 1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta)
-    dr = np.linspace(0.0, 1.0 - 1.0 / n, n)
-    dr = jax.random.shuffle(key2, dr)
-    dr = dr + jax.random.uniform(key3, minval=0.0, maxval=1.0 / n, shape=(n,))
+    dr = np.linspace(0.0, 1.0 - 1.0 / n, n, dtype=DTYPE)
+    dr = jax.random.permutation(key2, dr)
+    dr = dr + jax.random.uniform(key3, minval=0.0, maxval=1.0 / n, shape=(n,),
+                                 dtype=DTYPE)
     r = dr * r0
     x = r * np.cos(theta)
     y = r * np.sin(theta)
@@ -115,9 +120,9 @@ def vmap_boundary_conditions(points_on_boundary, bc_params):
 
 def source(r, x):
     if r is None:
-        return np.array([1.0])
+        return np.array([1.0], dtype=DTYPE)
     else:
-        result = np.array([0.0])
+        result = np.array([0.0], dtype=DTYPE)
         for n in range(r.shape[0]):
             result += (
                 r[n, 2] * 1e2 * np.exp(-((x[0] - r[n, 0]) ** 2 + (x[1] - r[n, 1]) ** 2))

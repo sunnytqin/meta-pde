@@ -38,12 +38,13 @@ def laplace_operator(potential_fn, x):
         laplacian: laplacian of phi(x,y)
     """
     assert len(x.shape) == 1
+    dtype = x.dtype
     result = 0.0
+    phi_fn = lambda x: np.squeeze(potential_fn(x)).astype(np.float32)
+    dphi_dx = jax.jit(lambda x: grad(phi_fn)(x).astype(np.float32))
     for i in range(x.shape[0]):
-        phi_fn = lambda x: np.squeeze(potential_fn(x))
-        dphi_dxi = lambda x: grad(phi_fn)(x)[i]
-        d2phi_dxi2 = lambda x: grad(dphi_dxi)(x)[i]
-        result = result + d2phi_dxi2(x)
+        d2phi_dxi2 = grad(lambda x: dphi_dx(x)[i])(x)[i].astype(np.float32)
+        result = result + d2phi_dxi2
     return result
 
 
@@ -93,7 +94,9 @@ def nf_apply(
         first_init = siren_init
         assert n_fourier is None
     else:
-        kernel_init = flax.nn.initializers.lecun_normal()
+        kernel_init = flax.nn.initializers.variance_scaling(
+            1.0, "fan_in", "truncated_normal"
+        ) #flax.nn.initializers.lecun_normal()
         first_init = kernel_init
     x = whiten(x, mean_x, std_x)
     if n_fourier is not None:

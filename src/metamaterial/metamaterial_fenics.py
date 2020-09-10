@@ -143,7 +143,7 @@ def make_fenics(field_fn, geo_params):
 
     dofs = mm.V.tabulate_dof_coordinates().reshape(-1, 2, 2)[:, 0, :]
     outputs = field_fn(dofs)
-    field_vec = outputs.reshape(-1)
+    field_vec = outputs.reshape(-1).astype(np.float32)
 
     field_V = fa.Function(mm.V)
     assert len(field_vec) == len(field_V.vector())
