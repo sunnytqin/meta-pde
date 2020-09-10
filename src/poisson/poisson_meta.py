@@ -3,9 +3,6 @@ import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
 
-from jax.config import config
-config.enable_omnistaging()
-
 from ..nets.field import NeuralPotential
 from ..nets.gradient_conditioned import GradientConditionedField
 

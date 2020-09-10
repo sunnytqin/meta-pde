@@ -135,16 +135,7 @@ class GradientConditionedField(GradientConditionedModel):
             if self.nonlinearity == np.sin:
                 a = a * 30.
             a = self.nonlinearity(x)
-        """
-        bout = x[:, :self.output_dim].reshape(-1, self.output_dim, 1)
-        quads = x[:, self.output_dim:
-                  self.output_dim+self.output_dim*self.input_dim].reshape(
-                      x.shape[0], self.output_dim, self.input_dim)
-        lins = x[:, self.output_dim+self.output_dim*self.input_dim:].reshape(
-                      x.shape[0], self.output_dim, self.input_dim)
-        inputs = inputs.reshape(inputs.shape[0], 1, -1)
-        out = np.sum(inputs**2 * quads + inputs * lins + bout, axis=-1)
-        """
+
         if squeeze:
             assert x.shape[0] == 1
             x = x.squeeze(0)
