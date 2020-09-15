@@ -1,3 +1,6 @@
+from jax.config import config
+config.enable_omnistaging()
+
 import jax
 import jax.numpy as np
 import numpy as npo
@@ -25,8 +28,6 @@ import os
 
 import argparse
 
-from jax.config import config
-config.enable_omnistaging()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=8, help="batch size (in tasks)")
@@ -36,16 +37,16 @@ parser.add_argument("--outer_lr", type=float, default=3e-4, help="outer learning
 parser.add_argument(
     "--outer_points",
     type=int,
-    default=64,
+    default=512,
     help="num query points on the boundary and in domain",
 )
 parser.add_argument(
     "--inner_points",
     type=int,
-    default=64,
+    default=512,
     help="num support points on the boundary and in domain",
 )
-parser.add_argument("--inner_steps", type=int, default=2, help="num inner steps")
+parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e6), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
 parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size")
@@ -147,7 +148,7 @@ if __name__ == '__main__':
         return batch_loss
 
 
-    # @partial(jax.jit, static_argnums=(0,))
+    @partial(jax.jit, static_argnums=(0,))
     def batch_train_step(args, optimizer, key):
         # The input key is terminal
         keys = jax.random.split(key, args.bsize)
@@ -225,7 +226,7 @@ if __name__ == '__main__':
                 plt.subplot(4, N // 2, 1 + N + i)
                 fa.plot(ground_truth, title="Truth")
 
-
+    @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5, 6))
     def vmap_validation_error(
         optimizer,
         ground_truth_source,
@@ -310,6 +311,9 @@ if __name__ == '__main__':
 
     for step in range(args.outer_steps):
         key, subkey = jax.random.split(key, 2)
+        #log(jax.make_jaxpr(lambda opt, key: batch_train_step(args, opt, key))(
+        #    optimizer, subkey))
+        #pdb.set_trace()
         with Timer() as t:
             optimizer, loss = batch_train_step(args, optimizer, subkey)
             loss = float(loss)

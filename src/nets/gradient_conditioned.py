@@ -32,9 +32,10 @@ class GradientConditionedModel(nn.Module):
         inner_lr,
         train_inner_lrs,
         n_fourier=None,
+        first_order=False,
     ):
-        if len(x.shape) == 1:
-            x = x.reshape(1, -1)
+        # if len(x.shape) == 1:
+        #     x = x.reshape(1, -1)
 
         def param_loss(params):
             return inner_loss(
@@ -53,25 +54,27 @@ class GradientConditionedModel(nn.Module):
             if train_inner_lrs:
                 lrs = self.param("lrs", (inner_steps,), flax.nn.initializers.ones)
             else:
-                lrs = np.array([1.0 for _ in range(inner_steps)])
+                lrs = np.ones([inner_steps])
 
-            @jit
-            def inner_step(opt_state, step_and_lr):
-                step, lr = step_and_lr
+            # @jit
+            def inner_step(opt_state, lr):
                 params = get_params(opt_state)
                 lr_scaled_loss = scale_loss(lr)
                 scaled_loss, gradient = jax.value_and_grad(lr_scaled_loss)(params)
-                opt_state = opt_update(step, gradient, opt_state)
-                return opt_state, scaled_loss
+                opt_state = opt_update(0, gradient, opt_state)
+                return opt_state, None
 
-            opt_state, losses = jax.lax.scan(
+            opt_state, _ = jax.lax.scan(
                 inner_step,
                 opt_state,
-                np.stack([np.arange(len(lrs)), lrs], axis=1),
+                lrs,
                 length=inner_steps,
             )
 
             params = get_params(opt_state)
+
+        if first_order:
+            params = jax.lax.stop_gradient(params)
 
         return self.base_forward(x, params, n_fourier)
 
@@ -108,24 +111,23 @@ class GradientConditionedField(GradientConditionedModel):
                 [input_dim] + sizes + [output_dim]
             )  # [2*input_dim*output_dim + output_dim]
         del sizes
-        weights = []
-        biases = []
+        weights = [_ for _ in range(len(self.sizes) - 1)]
+        biases = [_ for _ in range(len(self.sizes) - 1)]
         for i in range(len(self.sizes) - 1):
-            weights.append(
-                self.param(
+            weights[i] = self.param(
                     "W" + str(i), (self.sizes[i], self.sizes[i + 1]),
                     first_init if i==0 else kernel_init
                 )
-            )
-            biases.append(self.param("b" + str(i), (1, self.sizes[i + 1]), bias_init))
+            biases[i] = self.param("b" + str(i), (1, self.sizes[i + 1]), bias_init)
         return {"weights": weights, "biases": biases}
 
+    #@partial(jax.jit, static_argnums=(-1))
     def base_forward(self, x, params, n_fourier):
-        if len(x.shape) == 1:
-            x = x.reshape(1, -1)
-            squeeze = True
-        else:
-            squeeze = False
+        #if len(x.shape) == 1:
+        #    x = x.reshape(1, -1)
+        #    squeeze = True
+        #else:
+        #    squeeze = False
         inputs = x
         if n_fourier is not None:
             x = fourier_features(x, n_fourier)
@@ -133,10 +135,10 @@ class GradientConditionedField(GradientConditionedModel):
         for W, b in zip(params["weights"], params["biases"]):
             x = np.dot(a, W) + b
             if self.nonlinearity == np.sin:
-                a = a * 30.
+                x = x * 30.
             a = self.nonlinearity(x)
 
-        if squeeze:
-            assert x.shape[0] == 1
-            x = x.squeeze(0)
+        if x.shape[-1] == 1:
+            x = x.sum(axis=-1)
+
         return x

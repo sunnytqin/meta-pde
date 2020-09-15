@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import pdb
 
 
-DTYPE = np.float16
+DTYPE = np.float32
 
 
 def plot(model, grid, source_params, bc_params, geo_params=(0.0, 0.0)):
@@ -30,13 +30,11 @@ def plot(model, grid, source_params, bc_params, geo_params=(0.0, 0.0)):
 def loss_fn(
     points_on_boundary, points_in_domain, potential_fn, source_params, bc_params
 ):
-    err_on_boundary = vmap_boundary_conditions(points_on_boundary, bc_params).reshape(
-        -1, 1
-    ) - potential_fn(points_on_boundary).reshape(-1, 1)
+    err_on_boundary = vmap_boundary_conditions(
+        points_on_boundary, bc_params) - potential_fn(points_on_boundary)
     loss_on_boundary = np.mean(err_on_boundary ** 2)
-    err_in_domain = vmap_laplace_operator(points_in_domain, potential_fn).reshape(
-        -1, 1
-    ) - vmap_source(points_in_domain, source_params).reshape(-1, 1)
+    err_in_domain = vmap_laplace_operator(
+        points_in_domain, potential_fn) - vmap_source(points_in_domain, source_params)
     loss_in_domain = np.mean(err_in_domain ** 2)
     return loss_on_boundary, loss_in_domain
 
@@ -56,16 +54,14 @@ def sample_params(key, args):
         geo_params = jax.random.uniform(k3, minval=-0.2, maxval=0.2, shape=(2,),
                                         dtype=DTYPE)
     else:
-        geo_params = np.array([0.0]), np.array([0.0])
+        geo_params = np.zeros(2, dtype=DTYPE)
 
     return source_params, bc_params, geo_params
 
 
-def sample_points_on_boundary(key, n, geo_params=None):
-    if geo_params is not None:
-        c1, c2 = geo_params
-    else:
-        c1, c2 = np.zeros(2, dtype=DTYPE)
+@partial(jax.jit, static_argnums=(1,))
+def sample_points_on_boundary(key, n, geo_params):
+    c1, c2 = geo_params
     theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
     theta = theta + jax.random.uniform(
         key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
@@ -76,11 +72,9 @@ def sample_points_on_boundary(key, n, geo_params=None):
     return np.stack([x, y], axis=1)
 
 
-def sample_points_in_domain(key, n, geo_params=None):
-    if geo_params is not None:
-        c1, c2 = geo_params
-    else:
-        c1, c2 = np.zeros(2, dtype=DTYPE)
+@partial(jax.jit, static_argnums=(1,))
+def sample_points_in_domain(key, n, geo_params):
+    c1, c2 = geo_params
     key1, key2, key3 = jax.random.split(key, 3)
     theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
     theta = theta + jax.random.uniform(
@@ -97,38 +91,34 @@ def sample_points_in_domain(key, n, geo_params=None):
     return np.stack([x, y], axis=1)
 
 
+@jax.jit
 def boundary_conditions(r, x):
     """
     This returns the value required by the dirichlet boundary condition at x.
     """
-    if r is None:
-        return 0.0
-    else:
-        theta = np.arctan2(x[1], x[0])
-        return (
-            r[0]
-            + r[1] / 4 * np.cos(theta)
-            + r[2] / 4 * np.sin(theta)
-            + r[3] / 4 * np.cos(2 * theta)
-            + r[4] / 4 * np.sin(2 * theta)
-        )
+    theta = np.arctan2(x[1], x[0])
+    return (
+        r[0]
+        + r[1] / 4 * np.cos(theta)
+        + r[2] / 4 * np.sin(theta)
+        + r[3] / 4 * np.cos(2 * theta)
+        + r[4] / 4 * np.sin(2 * theta)
+    ).sum()
 
 
+@jax.jit
 def vmap_boundary_conditions(points_on_boundary, bc_params):
     return vmap(partial(boundary_conditions, bc_params))(points_on_boundary)
 
 
+@jax.jit
 def source(r, x):
-    if r is None:
-        return np.array([1.0], dtype=DTYPE)
-    else:
-        result = np.array([0.0], dtype=DTYPE)
-        for n in range(r.shape[0]):
-            result += (
-                r[n, 2] * 1e2 * np.exp(-((x[0] - r[n, 0]) ** 2 + (x[1] - r[n, 1]) ** 2))
-            )
-        return result
+    x = x.reshape([1, -1]) * np.ones([r.shape[0], x.shape[0]])
+    results = r[:, 2] * 1e2 * np.exp(-((x[:, 0] - r[:, 0])**2 +
+                                       (x[:, 1] - r[:, 1])**2))
+    return results.sum()
 
 
+@jax.jit
 def vmap_source(points_in_domain, source_params):
     return vmap(partial(source, source_params))(points_in_domain)

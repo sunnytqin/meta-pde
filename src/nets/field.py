@@ -23,7 +23,6 @@ def first_layer_siren_init(key, shape, dtype=np.float32):
     return jax.random.uniform(key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in)
 
 
-# @jax.jit
 def vmap_laplace_operator(x, potential_fn):
     return vmap(partial(laplace_operator, potential_fn))(x)
 
@@ -39,13 +38,10 @@ def laplace_operator(potential_fn, x):
     """
     assert len(x.shape) == 1
     dtype = x.dtype
-    result = 0.0
-    phi_fn = lambda x: np.squeeze(potential_fn(x)).astype(np.float32)
-    dphi_dx = jax.jit(lambda x: grad(phi_fn)(x).astype(np.float32))
-    for i in range(x.shape[0]):
-        d2phi_dxi2 = grad(lambda x: dphi_dx(x)[i])(x)[i].astype(np.float32)
-        result = result + d2phi_dxi2
-    return result
+    hess_fn = jax.jacfwd(jax.jacrev(lambda x: potential_fn(x).squeeze()))
+    hess = hess_fn(x)
+    assert len(hess.shape) == 2
+    return np.trace(hess)
 
 
 def fourier_features(x, n_features):
@@ -164,7 +160,7 @@ class NeuralField1d(nn.Module):
             mean_y,
             std_y,
             n_fourier,
-        )
+        ).sum(axis=-1)
 
 
 NeuralPotential = NeuralField1d
