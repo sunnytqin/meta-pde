@@ -61,19 +61,15 @@ parser.add_argument(
     help="weight on interior boundary loss",
 )
 parser.add_argument(
-    "--bc_weight",
-    type=float,
-    default=1.0,
-    help="weight on outer boundary loss",
+    "--bc_weight", type=float, default=1.0, help="weight on outer boundary loss",
 )
 parser.add_argument("--out_dir", type=str, default="mm_meta_results")
 parser.add_argument("--expt_name", type=str, default=None)
 parser.add_argument("--viz_every", type=int, default=0, help="plot every N steps")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = parser.parse_args()
-
 
     if args.expt_name is not None:
         if not os.path.exists(args.out_dir):
@@ -82,29 +78,37 @@ if __name__ == '__main__':
         if os.path.exists(path):
             os.remove(path)
         outfile = open(path, "w")
+
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
             print(*args, **kwargs, file=outfile, flush=True)
 
     else:
+
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
 
-
-
-    def loss_fn(field_fn, points_on_boundary, points_in_domain,
-                points_on_interior, source_params, bc_params, geo_params):
+    def loss_fn(
+        field_fn,
+        points_on_boundary,
+        points_in_domain,
+        points_on_interior,
+        source_params,
+        bc_params,
+        geo_params,
+    ):
 
         boundary_loss = boundary_loss_fn(points_on_boundary, field_fn, bc_params)
         domain_loss = domain_loss_fn(points_in_domain, field_fn, source_params)
         interior_loss = interior_bc_loss_fn(
-            points_on_interior, field_fn, geo_params, source_params)
+            points_on_interior, field_fn, geo_params, source_params
+        )
 
         return (
-            args.bc_weight * boundary_loss +
-            domain_loss +
-            args.interior_weight * interior_loss)
-
+            args.bc_weight * boundary_loss
+            + domain_loss
+            + args.interior_weight * interior_loss
+        )
 
     def get_meta_loss(
         points_in_domain,
@@ -115,7 +119,7 @@ if __name__ == '__main__':
         inner_on_interior,
         source_params,
         bc_params,
-        geo_params
+        geo_params,
     ):
         field_fn = lambda model: partial(
             model,
@@ -125,7 +129,7 @@ if __name__ == '__main__':
                 "points_on_interior": inner_on_interior,
                 "source_params": source_params,
                 "bc_params": bc_params,
-                "geo_params": geo_params
+                "geo_params": geo_params,
             },
         )
 
@@ -147,7 +151,9 @@ if __name__ == '__main__':
         k1, k2, k3, k4, k5, k6, k7 = jax.random.split(key, 7)
         source_params, bc_params, geo_params = sample_params(k1, args)
         points_in_domain = sample_points_in_domain(k2, args.outer_points, geo_params)
-        points_on_boundary = sample_points_on_boundary(k3, args.outer_points, geo_params)
+        points_on_boundary = sample_points_on_boundary(
+            k3, args.outer_points, geo_params
+        )
         points_on_interior = sample_points_on_interior_boundary(
             k4, args.outer_points, geo_params
         )
@@ -168,7 +174,6 @@ if __name__ == '__main__':
             geo_params=geo_params,
         )
 
-
     def get_batch_loss(args, keys):
         def loss(args, model, key):
             return get_single_example_loss(args, key)(model)
@@ -177,7 +182,6 @@ if __name__ == '__main__':
             return jax.vmap(partial(loss, args, model))(keys)
 
         return batch_loss
-
 
     # @partial(jax.jit, static_argnums=(0,))
     def batch_train_step(args, optimizer, key):
@@ -189,7 +193,6 @@ if __name__ == '__main__':
         )
         optimizer = optimizer.apply_gradient(gradient)
         return optimizer, loss
-
 
     def get_ground_truth_points(source_params_list, bc_params_list, geo_params_list):
         fenics_functions = []
@@ -205,15 +208,16 @@ if __name__ == '__main__':
             ).astype(DTYPE)
         return fenics_functions, true_fields, coords
 
-
-    def make_field_func(key, optimizer,
-                        source_params, bc_params, geo_params, coords, args):
+    def make_field_func(
+        key, optimizer, source_params, bc_params, geo_params, coords, args
+    ):
         # Input key is terminal
         k1, k2, k3 = jax.random.split(key, 3)
         inner_in_domain = sample_points_in_domain(k1, args.inner_points, geo_params)
         inner_on_boundary = sample_points_on_boundary(k2, args.inner_points, geo_params)
         inner_on_interior = sample_points_on_interior_boundary(
-            k3, args.inner_points, geo_params)
+            k3, args.inner_points, geo_params
+        )
         field_fn = partial(
             optimizer.target,
             inner_loss_kwargs={
@@ -236,7 +240,6 @@ if __name__ == '__main__':
         # to the Fenics representation
         field_vals = np.transpose(field_vals).reshape(-1)
         return field_vals
-
 
     def compare_plots_with_ground_truth(
         optimizer, fenics_functions, sources, bc_params, geo_params, args
@@ -268,11 +271,10 @@ if __name__ == '__main__':
 
                 plt.subplot(4, N // 2, 1 + i)
 
-                fa.plot(u_approx, title="Approx", mode='displacement')
+                fa.plot(u_approx, title="Approx", mode="displacement")
                 # bottom two rots are ground truth
                 plt.subplot(4, N // 2, 1 + N + i)
-                fa.plot(ground_truth, title="Truth", mode='displacement')
-
+                fa.plot(ground_truth, title="Truth", mode="displacement")
 
     def vmap_validation_error(
         optimizer,
@@ -296,7 +298,6 @@ if __name__ == '__main__':
         )
 
         return np.mean((fields - trunc_true_fields) ** 2)
-
 
     GCField = GradientConditionedField.partial(
         inner_steps=args.inner_steps,
@@ -360,37 +361,52 @@ if __name__ == '__main__':
             trunc_true_fields,
             args,
         )
-        log("step: {}, loss: {}, val: {}, time: {}".format(
-                step, loss, val_error, t.interval))
+        log(
+            "step: {}, loss: {}, val: {}, time: {}".format(
+                step, loss, val_error, t.interval
+            )
+        )
 
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
             compare_plots_with_ground_truth(
-                optimizer, fenics_functions,
-                ground_truth_source, ground_truth_bc, ground_truth_geo, args
+                optimizer,
+                fenics_functions,
+                ground_truth_source,
+                ground_truth_bc,
+                ground_truth_geo,
+                args,
             )
             if args.expt_name is not None:
-                plt.savefig(os.path.join(args.out_dir, args.expt_name +
-                                         "_viz_step_{}.png".format(step)))
+                plt.savefig(
+                    os.path.join(
+                        args.out_dir, args.expt_name + "_viz_step_{}.png".format(step)
+                    )
+                )
             else:
                 plt.show()
             if args.expt_name is not None:
-                plt.savefig(os.path.join(args.out_dir, expt_name +
-                                         "_viz_step_{}.png".format(step)))
+                plt.savefig(
+                    os.path.join(
+                        args.out_dir, expt_name + "_viz_step_{}.png".format(step)
+                    )
+                )
             else:
                 plt.show()
-
 
     if args.expt_name is not None:
         outfile.close()
 
     plt.figure()
     compare_plots_with_ground_truth(
-        optimizer, fenics_functions,
-        ground_truth_source, ground_truth_bc, ground_truth_geo, args
+        optimizer,
+        fenics_functions,
+        ground_truth_source,
+        ground_truth_bc,
+        ground_truth_geo,
+        args,
     )
     if args.expt_name is not None:
-        plt.savefig(os.path.join(args.out_dir, args.expt_name +
-                                 "_viz_final.png"))
+        plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))
     else:
         plt.show()

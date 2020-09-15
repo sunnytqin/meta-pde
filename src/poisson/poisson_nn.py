@@ -46,15 +46,15 @@ parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=1e1, help="weight on bc loss")
 parser.add_argument("--out_dir", type=str, default="poisson_results")
 parser.add_argument("--expt_name", type=str, default=None)
-parser.add_argument("--viz_every", type=int, default=int(1e3),
-                    help="plot every N steps")
-
+parser.add_argument(
+    "--viz_every", type=int, default=int(1e3), help="plot every N steps"
+)
 
 
 loss_fn = jax.jit(loss_fn)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.expt_name is not None:
@@ -64,14 +64,15 @@ if __name__ == '__main__':
         if os.path.exists(path):
             os.remove(path)
         outfile = open(path, "w")
+
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
             print(*args, **kwargs, file=outfile, flush=True)
 
     else:
+
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
-
 
     Field = NeuralPotential.partial(
         sizes=[args.layer_size for _ in range(args.num_layers)],
@@ -86,14 +87,13 @@ if __name__ == '__main__':
 
     optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(model)
 
-
     grid = npo.zeros([101, 101, 2])
     for i in range(101):
         for j in range(101):
             grid[i, j] += [i * 1.0 / 100, j * 1.0 / 100]
     grid = np.array(grid).astype(DTYPE).reshape(-1, 2) * 2 - np.array(
-        [[1.0, 1.0]]).astype(DTYPE)
-
+        [[1.0, 1.0]]
+    ).astype(DTYPE)
 
     @jax.jit
     def train_step(
@@ -124,10 +124,8 @@ if __name__ == '__main__':
         loss = loss_bc + loss_dom
         gradient = jax.tree_multimap(lambda x, y: x + y, grad_bc, grad_dom)
 
-
         optimizer = optimizer.apply_gradient(gradient)
         return (optimizer, loss, loss_bc, loss_dom, grad_bc_norm, grad_dom_norm)
-
 
     key, subkey = jax.random.split(key)
 
@@ -144,9 +142,7 @@ if __name__ == '__main__':
         jax.random.PRNGKey(3), args.domain_points, geo_params
     )
 
-    true = np.array(
-        [ground_truth(point) for point in points_in_domain_test]
-    )
+    true = np.array([ground_truth(point) for point in points_in_domain_test])
 
     for step in range(args.outer_steps):
         key, sk1, sk2 = jax.random.split(key, 3)
@@ -201,9 +197,11 @@ if __name__ == '__main__':
                 geo_params,
             )
             if args.expt_name is not None:
-                plt.savefig(os.path.join(
-                    args.out_dir, args.expt_name +
-                    "_viz_step_{}.png".format(step)))
+                plt.savefig(
+                    os.path.join(
+                        args.out_dir, args.expt_name + "_viz_step_{}.png".format(step)
+                    )
+                )
             else:
                 plt.show()
 
@@ -213,7 +211,7 @@ if __name__ == '__main__':
     plt.figure()
     plt.subplot(3, 1, 1)
     plot(optimizer.target, grid, source_params, bc_params, geo_params)
-    plt.title('pred')
+    plt.title("pred")
     plt.subplot(3, 1, 2)
     plot(
         lambda xs: np.array([ground_truth(x) for x in xs]),
@@ -222,7 +220,7 @@ if __name__ == '__main__':
         bc_params,
         geo_params,
     )
-    plt.title('truth')
+    plt.title("truth")
     plt.subplot(3, 1, 3)
     plot(
         lambda xs: optimizer.target(xs).reshape(-1, 1).astype(np.float32)
@@ -232,7 +230,7 @@ if __name__ == '__main__':
         bc_params,
         geo_params,
     )
-    plt.title('pred-true')
+    plt.title("pred-true")
     if args.expt_name is not None:
         plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))
     else:

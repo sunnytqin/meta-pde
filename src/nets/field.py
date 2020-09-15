@@ -92,7 +92,7 @@ def nf_apply(
     else:
         kernel_init = flax.nn.initializers.variance_scaling(
             1.0, "fan_in", "truncated_normal"
-        ) #flax.nn.initializers.lecun_normal()
+        )  # flax.nn.initializers.lecun_normal()
         first_init = kernel_init
     x = whiten(x, mean_x, std_x)
     if n_fourier is not None:

@@ -31,10 +31,12 @@ def loss_fn(
     points_on_boundary, points_in_domain, potential_fn, source_params, bc_params
 ):
     err_on_boundary = vmap_boundary_conditions(
-        points_on_boundary, bc_params) - potential_fn(points_on_boundary)
+        points_on_boundary, bc_params
+    ) - potential_fn(points_on_boundary)
     loss_on_boundary = np.mean(err_on_boundary ** 2)
-    err_in_domain = vmap_laplace_operator(
-        points_in_domain, potential_fn) - vmap_source(points_in_domain, source_params)
+    err_in_domain = vmap_laplace_operator(points_in_domain, potential_fn) - vmap_source(
+        points_in_domain, source_params
+    )
     loss_in_domain = np.mean(err_in_domain ** 2)
     return loss_on_boundary, loss_in_domain
 
@@ -51,8 +53,9 @@ def sample_params(key, args):
     else:
         bc_params = None
     if args.vary_geometry:
-        geo_params = jax.random.uniform(k3, minval=-0.2, maxval=0.2, shape=(2,),
-                                        dtype=DTYPE)
+        geo_params = jax.random.uniform(
+            k3, minval=-0.2, maxval=0.2, shape=(2,), dtype=DTYPE
+        )
     else:
         geo_params = np.zeros(2, dtype=DTYPE)
 
@@ -83,8 +86,9 @@ def sample_points_in_domain(key, n, geo_params):
     r0 = 1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta)
     dr = np.linspace(0.0, 1.0 - 1.0 / n, n, dtype=DTYPE)
     dr = jax.random.permutation(key2, dr)
-    dr = dr + jax.random.uniform(key3, minval=0.0, maxval=1.0 / n, shape=(n,),
-                                 dtype=DTYPE)
+    dr = dr + jax.random.uniform(
+        key3, minval=0.0, maxval=1.0 / n, shape=(n,), dtype=DTYPE
+    )
     r = dr * r0
     x = r * np.cos(theta)
     y = r * np.sin(theta)
@@ -114,8 +118,9 @@ def vmap_boundary_conditions(points_on_boundary, bc_params):
 @jax.jit
 def source(r, x):
     x = x.reshape([1, -1]) * np.ones([r.shape[0], x.shape[0]])
-    results = r[:, 2] * 1e2 * np.exp(-((x[:, 0] - r[:, 0])**2 +
-                                       (x[:, 1] - r[:, 1])**2))
+    results = (
+        r[:, 2] * 1e2 * np.exp(-((x[:, 0] - r[:, 0]) ** 2 + (x[:, 1] - r[:, 1]) ** 2))
+    )
     return results.sum()
 
 

@@ -1,15 +1,12 @@
 from jax.config import config
 
-config.enable_omnistaging()
-
 import jax
 import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
 
 from ..nets.field import NeuralPotential
-from ..nets.gradient_conditioned import GradientConditionedField
-
+from ..nets import maml
 
 from functools import partial
 import flax
@@ -30,11 +27,12 @@ import os
 import argparse
 
 
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--bsize", type=int, default=8, help="batch size (in tasks)")
-parser.add_argument("--n_eval", type=int, default=8, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=1e-4, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=3e-4, help="outer learning rate")
+parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
+parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
+parser.add_argument("--inner_lr", type=float, default=3e-4, help="inner learning rate")
+parser.add_argument("--outer_lr", type=float, default=2e-4, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
@@ -47,14 +45,14 @@ parser.add_argument(
     default=512,
     help="num support points on the boundary and in domain",
 )
-parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
+parser.add_argument("--inner_steps", type=int, default=10, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e6), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
 parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size")
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--siren", type=int, default=0, help="1=true.")
+parser.add_argument("--siren", type=int, default=1, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=1e1, help="weight on bc loss")
 parser.add_argument("--out_dir", type=str, default="poisson_meta_results")
@@ -66,6 +64,7 @@ parser.add_argument(
 
 if __name__ == "__main__":
     args = parser.parse_args()
+
 
     if args.expt_name is not None:
         if not os.path.exists(args.out_dir):
@@ -84,6 +83,9 @@ if __name__ == "__main__":
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
 
+
+    # --------------------- Defining the meta-training algorithm --------------------
+
     def loss_fn(
         potential_fn, points_on_boundary, points_in_domain, source_params, bc_params
     ):
@@ -93,74 +95,48 @@ if __name__ == "__main__":
 
         return args.bc_weight * loss_on_boundary + loss_in_domain
 
-    def get_meta_loss(
-        points_in_domain,
-        points_on_boundary,
-        inner_in_domain,
-        inner_on_boundary,
-        source_params,
-        bc_params,
-    ):
-        potential_fn = lambda model: partial(
-            model,
-            inner_loss_kwargs={
-                "points_in_domain": inner_in_domain,
-                "points_on_boundary": inner_on_boundary,
-                "source_params": source_params,
-                "bc_params": bc_params,
-            },
-        )
-
-        def meta_loss(model):
-            return loss_fn(
-                points_on_boundary=points_on_boundary,
-                points_in_domain=points_in_domain,
-                source_params=source_params,
-                bc_params=bc_params,
-                potential_fn=potential_fn(model),
-            )
-
-        return meta_loss
-
-    def get_single_example_loss(args, key):
+    def make_task_loss_fns(key):
         # The input key is terminal
         k1, k2, k3, k4, k5 = jax.random.split(key, 5)
         source_params, bc_params, geo_params = sample_params(k1, args)
-        points_in_domain = sample_points_in_domain(k2, args.outer_points, geo_params)
-        points_on_boundary = sample_points_on_boundary(
+        outer_in_domain = sample_points_in_domain(k2, args.outer_points, geo_params)
+        outer_on_boundary = sample_points_on_boundary(
             k3, args.outer_points, geo_params
         )
         inner_in_domain = sample_points_in_domain(k4, args.inner_points, geo_params)
         inner_on_boundary = sample_points_on_boundary(k5, args.inner_points, geo_params)
 
-        return get_meta_loss(
-            points_in_domain=points_in_domain,
-            points_on_boundary=points_on_boundary,
-            inner_in_domain=inner_in_domain,
-            inner_on_boundary=inner_on_boundary,
-            source_params=source_params,
-            bc_params=bc_params,
+        inner_loss = lambda key, potential_fn: loss_fn(
+            potential_fn, inner_on_boundary, inner_in_domain, source_params, bc_params
         )
-
-    def get_batch_loss(args, keys):
-        def loss(args, model, key):
-            return get_single_example_loss(args, key)(model)
-
-        def batch_loss(model):
-            return jax.vmap(partial(loss, args, model))(keys)
-
-        return batch_loss
-
-    @partial(jax.jit, static_argnums=(0,))
-    def batch_train_step(args, optimizer, key):
-        # The input key is terminal
-        keys = jax.random.split(key, args.bsize)
-        batch_loss_fn = get_batch_loss(args, keys)
-        loss, gradient = jax.value_and_grad(lambda m: batch_loss_fn(m).mean())(
-            optimizer.target
+        outer_loss = lambda key, potential_fn: loss_fn(
+            potential_fn, outer_on_boundary, outer_in_domain, source_params, bc_params
         )
-        optimizer = optimizer.apply_gradient(gradient)
-        return optimizer, loss
+        return inner_loss, outer_loss
+
+    make_inner_opt = flax.optim.Adam(learning_rate=args.inner_lr).create
+
+    maml_def = maml.MamlDef(
+        make_inner_opt=make_inner_opt,
+        make_task_loss_fns=make_task_loss_fns,
+        inner_steps=args.inner_steps,
+        n_batch_tasks=args.bsize,
+    )
+
+    Potential = NeuralPotential.partial(
+        sizes=[args.layer_size for _ in range(args.num_layers)],
+        dense_args=(),
+        nonlinearity=np.sin if args.siren else nn.swish,
+    )
+
+    key, subkey = jax.random.split(jax.random.PRNGKey(0))
+
+    _, init_params = Potential.init_by_shape(subkey, [((1, 2), DTYPE)])
+    optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(
+        flax.nn.Model(Potential, init_params))
+
+
+    # --------------------- Defining the evaluation functions --------------------
 
     def get_ground_truth_points(source_params_list, bc_params_list, geo_params_list):
         fenics_functions = []
@@ -176,26 +152,22 @@ if __name__ == "__main__":
             )
         return fenics_functions, potentials, coords
 
+    @jax.jit
     def make_potential_func(
-        key, optimizer, source_params, bc_params, geo_params, coords, args
+        key, model, source_params, bc_params, geo_params, coords
     ):
         # Input key is terminal
-        k1, k2 = jax.random.split(key)
+        k1, k2, k3 = jax.random.split(key, 3)
         inner_in_domain = sample_points_in_domain(k1, args.inner_points, geo_params)
         inner_on_boundary = sample_points_on_boundary(k2, args.inner_points, geo_params)
-        potential_fn = partial(
-            optimizer.target,
-            inner_loss_kwargs={
-                "points_in_domain": inner_in_domain,
-                "points_on_boundary": inner_on_boundary,
-                "source_params": source_params,
-                "bc_params": bc_params,
-            },
+        inner_loss_fn = lambda key, potential_fn: loss_fn(
+            potential_fn, inner_on_boundary, inner_in_domain, source_params, bc_params
         )
-        return np.squeeze(potential_fn(coords))
+        final_model, _ = maml.single_task_rollout(maml_def, k3, model, inner_loss_fn)
+        return np.squeeze(final_model(coords))
 
     def compare_plots_with_ground_truth(
-        optimizer, fenics_functions, sources, bc_params, geo_params, args
+        model, fenics_functions, sources, bc_params, geo_params
     ):
         keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
         M = len(fenics_functions)
@@ -208,75 +180,45 @@ if __name__ == "__main__":
                 # top two rows are optimizer.target
                 potentials = make_potential_func(
                     keys[i],
-                    optimizer,
+                    model,
                     sources[i],
                     bc_params[i],
                     geo_params[i],
                     ground_truth.function_space().tabulate_dof_coordinates(),
-                    args,
                 )
 
                 u_approx = fa.Function(ground_truth.function_space())
                 potentials.reshape(np.array(u_approx.vector()[:]).shape)
                 u_approx.vector().set_local(potentials)
 
-                plt.subplot(4, N // 2, 1 + i)
+                plt.subplot(2, N, 1 + i)
 
                 fa.plot(u_approx, title="Approx")
                 # bottom two rots are ground truth
-                plt.subplot(4, N // 2, 1 + N + i)
+                plt.subplot(2, N, 1 + i + N)
                 fa.plot(ground_truth, title="Truth")
 
-    @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5, 6))
+    @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
     def vmap_validation_error(
-        optimizer,
+        model,
         ground_truth_source,
         ground_truth_bc,
         ground_truth_geo,
         trunc_coords,
         trunc_true_potentials,
-        args,
     ):
         key = jax.random.PRNGKey(0)
         keys = jax.random.split(key, args.n_eval)
-        potentials = vmap(make_potential_func, (0, None, 0, 0, 0, 0, None))(
+        potentials = vmap(make_potential_func, (0, None, 0, 0, 0, 0))(
             keys,
-            optimizer,
+            model,
             ground_truth_source,
             ground_truth_bc,
             ground_truth_geo,
             trunc_coords,
-            args,
         )
 
         return np.mean((potentials - trunc_true_potentials) ** 2)
-
-    GCField = GradientConditionedField.partial(
-        inner_steps=args.inner_steps,
-        inner_lr=args.inner_lr,
-        train_inner_lrs=True,
-        inner_loss=loss_fn,
-        # n_fourier=5,
-        base_args={
-            "sizes": [args.layer_size for _ in range(args.num_layers)],
-            "input_dim": 2,
-            "output_dim": 1,
-            "nonlinearity": np.sin if args.siren else nn.swish,
-            "kernel_init": flax.nn.initializers.variance_scaling(
-                2.0, "fan_in", "truncated_normal"
-            ),
-        },  # These base_args are the arguments for the initialization of GradientConditionedFieldParameters
-    )
-
-    key, subkey = jax.random.split(jax.random.PRNGKey(0))
-
-    _, init_params = GCField.partial(
-        inner_loss_kwargs={}, inner_loss=lambda x: 0.0
-    ).init_by_shape(jax.random.PRNGKey(0), [((1, 2), DTYPE)])
-
-    model = flax.nn.Model(GCField, init_params)
-
-    optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(model)
 
     grid = npo.zeros([101, 101, 2])
     for i in range(101):
@@ -305,40 +247,43 @@ if __name__ == "__main__":
 
     trunc_coords = np.stack([c[: min([len(c) for c in coords])] for c in coords])
 
+
+
+    # --------------------- Run MAML --------------------
+
     for step in range(args.outer_steps):
         key, subkey = jax.random.split(key, 2)
-        # log(jax.make_jaxpr(lambda opt, key: batch_train_step(args, opt, key))(
-        #    optimizer, subkey))
-        # pdb.set_trace()
+
         with Timer() as t:
-            optimizer, loss = batch_train_step(args, optimizer, subkey)
-            loss = float(loss)
+            meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
+                maml_def, subkey, optimizer.target,
+            )
+            optimizer = optimizer.apply_gradient(meta_grad)
 
         val_error = vmap_validation_error(
-            optimizer,
+            optimizer.target,
             ground_truth_source,
             ground_truth_bc,
             ground_truth_geo,
             trunc_coords,
             trunc_true_potentials,
-            args,
         )
 
         log(
-            "step: {}, loss: {}, val: {}, time: {}".format(
-                step, loss, val_error, t.interval
+            "step: {}, meta_loss: {}, step_losses: {}, val: {}, time: {}".format(
+                step, np.mean(meta_losses), np.mean(losses, axis=0),
+                val_error, t.interval
             )
         )
 
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
             compare_plots_with_ground_truth(
-                optimizer,
+                optimizer.target,
                 fenics_functions,
                 ground_truth_source,
                 ground_truth_bc,
                 ground_truth_geo,
-                args,
             )
             if args.expt_name is not None:
                 plt.savefig(
@@ -354,12 +299,11 @@ if __name__ == "__main__":
 
     plt.figure()
     compare_plots_with_ground_truth(
-        optimizer,
+        optimizer.target,
         fenics_functions,
         ground_truth_source,
         ground_truth_bc,
         ground_truth_geo,
-        args,
     )
     if args.expt_name is not None:
         plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))

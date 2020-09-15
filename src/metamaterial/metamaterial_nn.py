@@ -57,19 +57,15 @@ parser.add_argument(
     help="weight on interior boundary loss",
 )
 parser.add_argument(
-    "--bc_weight",
-    type=float,
-    default=1.0,
-    help="weight on outer boundary loss",
+    "--bc_weight", type=float, default=1.0, help="weight on outer boundary loss",
 )
 parser.add_argument("--out_dir", type=str, default="mm_results")
 parser.add_argument("--expt_name", type=str, default=None)
 parser.add_argument("--viz_every", type=int, default=0, help="plot every N steps")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = parser.parse_args()
-
 
     if args.expt_name is not None:
         if not os.path.exists(args.out_dir):
@@ -78,14 +74,15 @@ if __name__ == '__main__':
         if os.path.exists(path):
             os.remove(path)
         outfile = open(path, "w")
+
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
             print(*args, **kwargs, file=outfile, flush=True)
 
     else:
+
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
-
 
     @partial(jax.jit, static_argnums=(4, 5, 6))
     def train_step(
@@ -102,11 +99,9 @@ if __name__ == '__main__':
             * boundary_loss_fn(points_on_boundary, model, bc_params)
         )(optimizer.target)
 
-
         domain_loss, domain_grad = jax.value_and_grad(
             lambda model: domain_loss_fn(points_in_domain, model, source_params)
         )(optimizer.target)
-
 
         interior_boundary_loss, interior_boundary_grad = jax.value_and_grad(
             lambda model: args.interior_weight
@@ -116,45 +111,62 @@ if __name__ == '__main__':
         )(optimizer.target)
 
         boundary_grad_norm = np.sqrt(
-            np.sum([(x ** 2).sum() for x in jax.tree_util.tree_flatten(boundary_grad)[0]])
+            np.sum(
+                [(x ** 2).sum() for x in jax.tree_util.tree_flatten(boundary_grad)[0]]
+            )
         )
         domain_grad_norm = np.sqrt(
             np.sum([(x ** 2).sum() for x in jax.tree_util.tree_flatten(domain_grad)[0]])
         )
         interior_boundary_grad_norm = np.sqrt(
-            np.sum([(x ** 2).sum() for x in jax.tree_util.tree_flatten(
-                interior_boundary_grad)[0]])
+            np.sum(
+                [
+                    (x ** 2).sum()
+                    for x in jax.tree_util.tree_flatten(interior_boundary_grad)[0]
+                ]
+            )
         )
 
         if args.pcgrad > 0.0:
             project = partial(pcgrad.project_grads, args.pcgrad)
-            domain_grad_ = jax.tree_multimap(project, domain_grad, boundary_grad,
-                                             interior_boundary_grad)
-            interior_boundary_grad_ = jax.tree_multimap(project, interior_boundary_grad,
-                                                        domain_grad,
-                                                        boundary_grad)
-            boundary_grad_ = jax.tree_multimap(project, boundary_grad,
-                                                        interior_boundary_grad,
-                                                        domain_grad)
+            domain_grad_ = jax.tree_multimap(
+                project, domain_grad, boundary_grad, interior_boundary_grad
+            )
+            interior_boundary_grad_ = jax.tree_multimap(
+                project, interior_boundary_grad, domain_grad, boundary_grad
+            )
+            boundary_grad_ = jax.tree_multimap(
+                project, boundary_grad, interior_boundary_grad, domain_grad
+            )
             domain_grad, interior_boundary_grad, boundary_grad = (
-                domain_grad_, interior_boundary_grad_, boundary_grad_
+                domain_grad_,
+                interior_boundary_grad_,
+                boundary_grad_,
             )
 
         bgrad_flat, treedef = jax.tree_flatten(boundary_grad)
         dgrad_flat, treedef = jax.tree_flatten(domain_grad)
         igflat, treedef = jax.tree_flatten(interior_boundary_grad)
         total_grad = jax.tree_unflatten(
-            treedef, [g1 + g2 + g3 for g1, g2, g3 in zip(bgrad_flat, dgrad_flat, igflat)]
+            treedef,
+            [g1 + g2 + g3 for g1, g2, g3 in zip(bgrad_flat, dgrad_flat, igflat)],
         )
 
         total_loss = boundary_loss + interior_boundary_loss + domain_loss
         optimizer = optimizer.apply_gradient(total_grad)
         grad_flat, _ = jax.tree_flatten(total_grad.params)
-        total_grad_norm = np.sqrt(np.sum([(g**2).sum() for g in grad_flat]))
+        total_grad_norm = np.sqrt(np.sum([(g ** 2).sum() for g in grad_flat]))
 
-        return (optimizer, total_loss, boundary_loss, domain_loss, interior_boundary_loss,
-                boundary_grad_norm, domain_grad_norm, interior_boundary_grad_norm)
-
+        return (
+            optimizer,
+            total_loss,
+            boundary_loss,
+            domain_loss,
+            interior_boundary_loss,
+            boundary_grad_norm,
+            domain_grad_norm,
+            interior_boundary_grad_norm,
+        )
 
     Field = NeuralField.partial(
         sizes=[args.layer_size for _ in range(args.num_layers)],
@@ -206,7 +218,9 @@ if __name__ == '__main__':
         k3, args.boundary_points, geo_params
     )
     plt.figure()
-    plt.scatter(points_in_domain_test[:, 0], points_in_domain_test[:, 1], label="domain")
+    plt.scatter(
+        points_in_domain_test[:, 0], points_in_domain_test[:, 1], label="domain"
+    )
     plt.scatter(
         points_on_boundary_test[:, 0], points_on_boundary_test[:, 1], label="boundary"
     )
@@ -219,7 +233,8 @@ if __name__ == '__main__':
     plt.savefig("mm_sampling.png")
 
     true = np.array([ground_truth(point) for point in points_in_domain_test]).astype(
-        DTYPE)
+        DTYPE
+    )
 
     for step in range(args.outer_steps):
         key, sk1, sk2, sk3 = jax.random.split(key, 4)
@@ -231,8 +246,16 @@ if __name__ == '__main__':
         points_on_interior_boundary = sample_points_on_interior_boundary(
             sk3, args.boundary_points, geo_params
         )
-        (optimizer, loss, loss_bc, loss_dom, loss_int,
-         grad_bc, grad_dom, grad_int) = train_step(
+        (
+            optimizer,
+            loss,
+            loss_bc,
+            loss_dom,
+            loss_int,
+            grad_bc,
+            grad_dom,
+            grad_int,
+        ) = train_step(
             points_in_domain,
             points_on_boundary,
             points_on_interior_boundary,
@@ -266,11 +289,15 @@ if __name__ == '__main__':
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
             plt.subplot(3, 1, 1)
-            fa.plot(make_fenics(optimizer.target, geo_params), mode="displacement", title="neural")
-            plt.title('pred')
+            fa.plot(
+                make_fenics(optimizer.target, geo_params),
+                mode="displacement",
+                title="neural",
+            )
+            plt.title("pred")
             plt.subplot(3, 1, 2)
             fa.plot(ground_truth, mode="displacement", title="truth")
-            plt.title('true')
+            plt.title("true")
             plt.subplot(3, 1, 3)
             fa.plot(
                 make_fenics(
@@ -281,25 +308,28 @@ if __name__ == '__main__':
                 mode="displacement",
                 title="difference",
             )
-            plt.title('pred-true')
+            plt.title("pred-true")
             if args.expt_name is not None:
-                plt.savefig(os.path.join(args.out_dir, expt_name +
-                                         "_viz_step_{}.png".format(step)))
+                plt.savefig(
+                    os.path.join(
+                        args.out_dir, expt_name + "_viz_step_{}.png".format(step)
+                    )
+                )
             else:
                 plt.show()
-
 
     if args.expt_name is not None:
         outfile.close()
 
     plt.figure()
     plt.subplot(3, 1, 1)
-    fa.plot(make_fenics(optimizer.target, geo_params),
-            mode="displacement", title="neural")
-    plt.title('pred')
+    fa.plot(
+        make_fenics(optimizer.target, geo_params), mode="displacement", title="neural"
+    )
+    plt.title("pred")
     plt.subplot(3, 1, 2)
     fa.plot(ground_truth, mode="displacement", title="truth")
-    plt.title('true')
+    plt.title("true")
     plt.subplot(3, 1, 3)
     fa.plot(
         make_fenics(
@@ -310,7 +340,7 @@ if __name__ == '__main__':
         mode="displacement",
         title="difference",
     )
-    plt.title('pred-true')
+    plt.title("pred-true")
     if args.expt_name is not None:
         plt.savefig(os.path.join(args.out_dir, expt_name + "_viz_final.png"))
     else:

@@ -1,4 +1,4 @@
-DTYPEimport jax
+import jax
 import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
@@ -64,7 +64,7 @@ def neo_hookean_energy(u, source_params, x):
         energy: [n, 1] or [1]
     """
     young_mod, poisson_ratio = source_params
-    #if poisson_ratio >= 0.5:
+    # if poisson_ratio >= 0.5:
     #    raise ValueError(
     #        "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
     #            poisson_ratio
@@ -97,7 +97,7 @@ def inv2d(A):
 def first_pk_stress(u, source_params, x):
 
     young_mod, poisson_ratio = source_params
-    #if poisson_ratio >= 0.5:
+    # if poisson_ratio >= 0.5:
     #    raise ValueError(
     #        "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
     #            poisson_ratio
@@ -123,7 +123,7 @@ def first_pk_stress(u, source_params, x):
 def second_pk_stress(u, source_params, x):
 
     young_mod, poisson_ratio = source_params
-    #if poisson_ratio >= 0.5:
+    # if poisson_ratio >= 0.5:
     #    raise ValueError(
     #        "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
     #            poisson_ratio
@@ -273,19 +273,18 @@ sample_points_in_domain = sample_points_in_domain_rejection
 def sample_params(key, args):
     k1, k2, k3, k4 = jax.random.split(key, 4)
     if args.vary_bc:
-        bc_params = args.bc_scale * jax.random.normal(k1, shape=(2, 5,),
-                                                      dtype=DTYPE)
+        bc_params = args.bc_scale * jax.random.normal(k1, shape=(2, 5,), dtype=DTYPE)
     else:
         bc_params = np.zeros([2, 5], dtype=DTYPE)
     if args.vary_geometry:
-        geo_params = jax.random.uniform(k2, minval=-0.03, maxval=0.03, shape=(2,),
-                                        dtype=DTYPE)
+        geo_params = jax.random.uniform(
+            k2, minval=-0.03, maxval=0.03, shape=(2,), dtype=DTYPE
+        )
     else:
         geo_params = np.zeros(2, dtype=DTYPE)
     if args.vary_source:
         young_mod = jax.random.uniform(k3, minval=0.7, maxval=2.0, dtype=DTYPE)
-        poisson_ratio = jax.random.uniform(k4, minval=0.4, maxval=0.49,
-                                           dtype=DTYPE)
+        poisson_ratio = jax.random.uniform(k4, minval=0.4, maxval=0.49, dtype=DTYPE)
     else:
         young_mod = 1.0
         poisson_ratio = 0.49
