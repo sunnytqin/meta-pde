@@ -198,6 +198,7 @@ if __name__ == "__main__":
                 plt.subplot(2, N, 1 + i + N)
                 fa.plot(ground_truth, title="Truth")
 
+
     @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
     def vmap_validation_error(
         model,
@@ -219,6 +220,15 @@ if __name__ == "__main__":
         )
 
         return np.mean((potentials - trunc_true_potentials) ** 2)
+
+
+    @jax.jit
+    def validation_losses(model):
+        _, losses, meta_losses = maml.multi_task_grad_and_losses(
+            maml_def, jax.random.PRNGKey(0), model,
+        )
+        return losses, meta_losses
+
 
     grid = npo.zeros([101, 101, 2])
     for i in range(101):
@@ -269,10 +279,17 @@ if __name__ == "__main__":
             trunc_true_potentials,
         )
 
+        val_losses, val_meta_losses = validation_losses(optimizer.target)
+
         log(
-            "step: {}, meta_loss: {}, step_losses: {}, val: {}, time: {}".format(
-                step, np.mean(meta_losses), np.mean(losses, axis=0),
+            "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, time: {}".format(
+                step, np.mean(meta_losses), np.mean(val_meta_losses),
                 val_error, t.interval
+            )
+        )
+        log(
+            "per_step_losses: {}\nper_step_val_losses:{}\n".format(
+                np.mean(losses, axis=0), np.mean(val_losses, axis=0),
             )
         )
 

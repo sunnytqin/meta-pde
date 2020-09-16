@@ -111,21 +111,17 @@ if __name__ == "__main__":
         )(optimizer.target)
 
         boundary_grad_norm = np.sqrt(
-            np.sum(
-                [(x ** 2).sum() for x in jax.tree_util.tree_flatten(boundary_grad)[0]]
-            )
-        )
+            jax.tree_util.tree_reduce(lambda x, y: x+y,
+                jax.tree_util.tree_map(lambda x: np.sum(x**2), boundary_grad)
+        ))
         domain_grad_norm = np.sqrt(
-            np.sum([(x ** 2).sum() for x in jax.tree_util.tree_flatten(domain_grad)[0]])
-        )
+            jax.tree_util.tree_reduce(lambda x, y: x+y,
+                jax.tree_util.tree_map(lambda x: np.sum(x**2), domain_grad)
+        ))
         interior_boundary_grad_norm = np.sqrt(
-            np.sum(
-                [
-                    (x ** 2).sum()
-                    for x in jax.tree_util.tree_flatten(interior_boundary_grad)[0]
-                ]
-            )
-        )
+            jax.tree_util.tree_reduce(lambda x, y: x+y,
+                jax.tree_util.tree_map(lambda x: np.sum(x**2), interior_boundary_grad)
+        ))
 
         if args.pcgrad > 0.0:
             project = partial(pcgrad.project_grads, args.pcgrad)
