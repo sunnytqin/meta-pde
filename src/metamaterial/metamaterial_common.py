@@ -9,7 +9,7 @@ from flax import nn
 from ..util.timer import Timer
 
 
-DTYPE = np.float16
+DTYPE = np.float32
 
 
 def interior_bc_loss_fn(points_on_interior_boundary, u, geo_params, source_params):

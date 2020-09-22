@@ -87,7 +87,7 @@ def nf_apply(
 ):
     if nonlinearity == np.sin:
         kernel_init = siren_init
-        first_init = siren_init
+        first_init = first_layer_siren_init
         assert n_fourier is None
     else:
         kernel_init = flax.nn.initializers.variance_scaling(
