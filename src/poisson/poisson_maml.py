@@ -31,7 +31,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=3e-4, help="inner learning rate")
+parser.add_argument("--inner_lr", type=float, default=3e-5, help="inner learning rate")
 parser.add_argument("--outer_lr", type=float, default=2e-4, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         )
         return inner_loss, outer_loss
 
-    make_inner_opt = flax.optim.Adam(learning_rate=args.inner_lr).create
+    make_inner_opt = flax.optim.Momentum(learning_rate=args.inner_lr, beta=0.).create
 
     maml_def = maml.MamlDef(
         make_inner_opt=make_inner_opt,
@@ -268,7 +268,15 @@ if __name__ == "__main__":
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
                 maml_def, subkey, optimizer.target,
             )
-            optimizer = optimizer.apply_gradient(meta_grad)
+            meta_grad_norm = np.sqrt(jax.tree_util.tree_reduce(lambda x, y: x+y, 
+                jax.tree_util.tree_map(lambda x: np.sum(x**2), meta_grad)))
+            if np.isfinite(meta_grad_norm):
+                if meta_grad_norm > 1.:
+                    log("clipping gradients with norm {}".format(
+                        meta_grad_norm))
+                    meta_grad = jax.tree_util.tree_map(
+                        lambda x: x/meta_grad_norm, meta_grad)  
+                optimizer = optimizer.apply_gradient(meta_grad)
 
         val_error = vmap_validation_error(
             optimizer.target,
@@ -282,11 +290,14 @@ if __name__ == "__main__":
         val_losses, val_meta_losses = validation_losses(optimizer.target)
 
         log(
-            "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, time: {}".format(
+            "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
+            "meta_grad_norm: {}, time: {}".format(
                 step, np.mean(meta_losses), np.mean(val_meta_losses),
-                val_error, t.interval
+                val_error, meta_grad_norm, t.interval
             )
         )
+        log("meta_loss_max: {}, meta_loss_min: {}, meta_loss_std: {}".format(
+            np.max(meta_losses), np.min(meta_losses), np.std(meta_losses)))
         log(
             "per_step_losses: {}\nper_step_val_losses:{}\n".format(
                 np.mean(losses, axis=0), np.mean(val_losses, axis=0),
