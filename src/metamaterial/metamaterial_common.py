@@ -272,7 +272,7 @@ sample_points_in_domain = sample_points_in_domain_rejection
 def sample_params(key, args):
     k1, k2, k3, k4 = jax.random.split(key, 4)
     if args.vary_bc:
-        bc_params = args.bc_scale * jax.random.uniform(k1, shape=(2, 5,),
+        bc_params = args.bc_scale * jax.random.uniform(k1, shape=(2, 7,),
                                                        minval=-1.,
                                                        maxval=1., dtype=DTYPE)
     else:
@@ -313,13 +313,17 @@ def boundary_conditions(r, x):
                 r[0, 0]
                 + r[0, 1] * np.cos(theta)
                 + r[0, 2] * np.sin(theta)
-                + r[0, 3] * np.cos(2 * theta)
-                + r[0, 4] * np.sin(2 * theta),
+                + r[0, 3] * np.cos(2 * theta)/2
+                + r[0, 4] * np.sin(2 * theta)/2
+                + r[0, 5] * np.cos(4 * theta)/4
+                + r[0, 6] * np.sin(4 * theta)/4,
                 r[1, 0]
                 + r[1, 1] * np.cos(theta)
                 + r[1, 2] * np.sin(theta)
-                + r[1, 3] * np.cos(2 * theta)
-                + r[1, 4] * np.sin(2 * theta),
+                + r[1, 3] * np.cos(2 * theta)/2
+                + r[1, 4] * np.sin(2 * theta)/2
+                + r[1, 5] * np.cos(4 * theta)/4
+                + r[1, 6] * np.sin(4 * theta)/4,
             ]
         )
 
