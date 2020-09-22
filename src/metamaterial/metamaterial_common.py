@@ -272,7 +272,9 @@ sample_points_in_domain = sample_points_in_domain_rejection
 def sample_params(key, args):
     k1, k2, k3, k4 = jax.random.split(key, 4)
     if args.vary_bc:
-        bc_params = args.bc_scale * jax.random.normal(k1, shape=(2, 5,), dtype=DTYPE)
+        bc_params = args.bc_scale * jax.random.uniform(k1, shape=(2, 5,),
+                                                       minval=-1.,
+                                                       maxval=1., dtype=DTYPE)
     else:
         bc_params = np.zeros([2, 5], dtype=DTYPE)
     if args.vary_geometry:
