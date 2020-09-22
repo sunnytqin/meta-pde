@@ -29,7 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=2, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=2, help="num eval tasks")
 parser.add_argument("--inner_lr", type=float, default=1e-5, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=3e-5, help="outer learning rate")
+parser.add_argument("--outer_lr", type=float, default=3e-4, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
@@ -301,7 +301,15 @@ if __name__ == "__main__":
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
                 maml_def, subkey, optimizer.target,
             )
-            optimizer = optimizer.apply_gradient(meta_grad)
+            meta_grad_norm = np.sqrt(jax.tree_util.tree_reduce(lambda x, y: x+y,
+                jax.tree_util.tree_map(lambda x: np.sum(x**2), meta_grad)))
+            if np.isfinite(meta_grad_norm):
+                if meta_grad_norm > 1.:
+                    log("clipping gradients with norm {}".format(
+                        meta_grad_norm))
+                    meta_grad = jax.tree_util.tree_map(
+                        lambda x: x/meta_grad_norm, meta_grad)
+                optimizer = optimizer.apply_gradient(meta_grad)
 
         val_error = vmap_validation_error(
             optimizer.target,
