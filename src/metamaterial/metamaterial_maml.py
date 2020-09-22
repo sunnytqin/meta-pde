@@ -28,8 +28,8 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=2, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=2, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=1e-5, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=3e-4, help="outer learning rate")
+parser.add_argument("--inner_lr", type=float, default=1e-6, help="inner learning rate")
+parser.add_argument("--outer_lr", type=float, default=3e-6, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
@@ -323,9 +323,9 @@ if __name__ == "__main__":
         val_losses, val_meta_losses = validation_losses(optimizer.target)
 
         log(
-            "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, time: {}".format(
+            "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, meta_grad_norm: {}, time: {}".format(
                 step, np.mean(meta_losses), np.mean(val_meta_losses),
-                val_error, t.interval
+                val_error, meta_grad_norm, t.interval
             )
         )
         log(
