@@ -215,7 +215,8 @@ def sample_points_on_interior_boundary(key, n, geo_params=None):
     return np.stack([x, y], axis=1)
 
 
-def sample_points_in_domain_rejection(key, n, geo_params=None):
+@partial(jax.jit, static_argnums=(1, 2, 3))
+def sample_points_in_domain_rejection(key, n, gridsize, geo_params=None):
     if geo_params is not None:
         c1, c2 = geo_params
     else:
@@ -224,10 +225,8 @@ def sample_points_in_domain_rejection(key, n, geo_params=None):
     def sample_grid(key):
         # We generate a semi-randomized uniform grid
         # Initialize the grid
-        nsqrt = (np.ceil(np.sqrt(n))).astype(int)
-
-        xg = np.linspace(-1, 1, nsqrt, endpoint=False, dtype=DTYPE)
-        yg = np.linspace(-1, 1, nsqrt, endpoint=False, dtype=DTYPE)
+        xg = np.linspace(-1, 1, gridsize, endpoint=False, dtype=DTYPE)
+        yg = np.linspace(-1, 1, gridsize, endpoint=False, dtype=DTYPE)
         # Cartesian product
         xys = np.transpose(np.array([np.tile(xg, len(yg)), np.repeat(yg, len(xg))]))
 

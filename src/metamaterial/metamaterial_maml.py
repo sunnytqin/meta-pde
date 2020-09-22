@@ -42,6 +42,8 @@ parser.add_argument(
     default=32,
     help="num support points on the boundary and in domain",
 )
+parser.add_argument("--gridsize", type=int, default=128,
+                    help="gridsize for sampling")
 parser.add_argument("--inner_steps", type=int, default=2, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e4), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
@@ -116,14 +118,16 @@ if __name__ == "__main__":
         # The input key is terminal
         k1, k2, k3, k4, k5, k6, k7 = jax.random.split(key, 7)
         source_params, bc_params, geo_params = sample_params(k1, args)
-        outer_in_domain = sample_points_in_domain(k2, args.outer_points, geo_params)
+        outer_in_domain = sample_points_in_domain(k2, args.outer_points,
+                                                  args.gridsize, geo_params)
         outer_on_boundary = sample_points_on_boundary(
             k3, args.outer_points, geo_params
         )
         outer_on_interior = sample_points_on_interior_boundary(
             k4, args.outer_points, geo_params
         )
-        inner_in_domain = sample_points_in_domain(k5, args.inner_points, geo_params)
+        inner_in_domain = sample_points_in_domain(k5, args.inner_points, args.gridsize,
+                                                  geo_params)
         inner_on_boundary = sample_points_on_boundary(k6, args.inner_points, geo_params)
         inner_on_interior = sample_points_on_interior_boundary(
             k7, args.inner_points, geo_params
@@ -178,13 +182,14 @@ if __name__ == "__main__":
             )
         return fenics_functions, true_fields, coords
 
+
     @jax.jit
     def make_field_func(
         key, model, source_params, bc_params, geo_params, coords
     ):
         # Input key is terminal
         k1, k2, k3, k4 = jax.random.split(key, 4)
-        inner_in_domain = sample_points_in_domain(k1, args.inner_points, geo_params)
+        inner_in_domain = sample_points_in_domain(k1, args.inner_points, args.gridsize, geo_params)
         inner_on_boundary = sample_points_on_boundary(k2, args.inner_points, geo_params)
         inner_on_interior = sample_points_on_interior_boundary(k3, args.inner_points, geo_params)
 
