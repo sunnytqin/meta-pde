@@ -38,6 +38,8 @@ parser.add_argument(
     default=2048,
     help="num points inside the domain for inner loss",
 )
+parser.add_argument("--gridsize", type=int, default=128,
+                    help="gridsize for sampling")
 parser.add_argument("--outer_steps", type=int, default=int(1e4), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
 parser.add_argument("--n_fourier", type=int, default=None, help="num fourier features")
@@ -59,6 +61,7 @@ parser.add_argument(
 parser.add_argument(
     "--bc_weight", type=float, default=1.0, help="weight on outer boundary loss",
 )
+parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--out_dir", type=str, default="mm_results")
 parser.add_argument("--expt_name", type=str, default=None)
 parser.add_argument("--viz_every", type=int, default=0, help="plot every N steps")
@@ -171,7 +174,7 @@ if __name__ == "__main__":
         n_fourier=args.n_fourier,
     )
 
-    key, subkey = jax.random.split(jax.random.PRNGKey(0))
+    key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), DTYPE)])
     model = flax.nn.Model(Field, init_params)
@@ -206,7 +209,8 @@ if __name__ == "__main__":
     plt.savefig("mm_init.png")
 
     key, k1, k2, k3 = jax.random.split(key, 4)
-    points_in_domain_test = sample_points_in_domain(k1, args.domain_points, geo_params)
+    points_in_domain_test = sample_points_in_domain(k1, args.domain_points,
+                                                    args.gridsize, geo_params)
     points_on_boundary_test = sample_points_on_boundary(
         k2, args.boundary_points, geo_params
     )
@@ -228,14 +232,13 @@ if __name__ == "__main__":
     plt.legend()
     plt.savefig("mm_sampling.png")
 
-    true = np.array([ground_truth(point) for point in points_in_domain_test]).astype(
-        DTYPE
-    )
+    true = np.array([ground_truth(point) for point in points_in_domain_test])
 
     for step in range(args.outer_steps):
         key, sk1, sk2, sk3 = jax.random.split(key, 4)
 
-        points_in_domain = sample_points_in_domain(sk1, args.domain_points, geo_params)
+        points_in_domain = sample_points_in_domain(sk1, args.domain_points,
+                                                   args.gridsize, geo_params)
         points_on_boundary = sample_points_on_boundary(
             sk2, args.boundary_points, geo_params
         )
@@ -263,8 +266,7 @@ if __name__ == "__main__":
         preds = optimizer.target(points_in_domain_test)
 
         try:
-            true_ = true.reshape(preds.shape).astype(DTYPE)
-            supervised_rmse = np.sqrt(np.mean((preds - true_) ** 2))
+            supervised_rmse = np.sqrt(np.mean((preds - true) ** 2))
         except Exception as e:
             pdb.set_trace()
         log(
@@ -308,7 +310,7 @@ if __name__ == "__main__":
             if args.expt_name is not None:
                 plt.savefig(
                     os.path.join(
-                        args.out_dir, expt_name + "_viz_step_{}.png".format(step)
+                        args.out_dir, args.expt_name + "_viz_step_{}.png".format(step)
                     )
                 )
             else:
@@ -338,6 +340,6 @@ if __name__ == "__main__":
     )
     plt.title("pred-true")
     if args.expt_name is not None:
-        plt.savefig(os.path.join(args.out_dir, expt_name + "_viz_final.png"))
+        plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))
     else:
         plt.show()
