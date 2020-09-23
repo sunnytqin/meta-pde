@@ -202,12 +202,10 @@ if __name__ == "__main__":
         field_vals = np.squeeze(final_model(coords))
         # We have something of shape [n_dofs, 2] = Aij, i=1..n_dovs, j=1,2
         # We want a corresponding vector of scalars, shape [2*n_dofs]
-        # But Fenics represents this vector as
-        #  [A00, A01, A10, A11, A20, A21 ...], whereas calling np.reshape(A, -1)
-        # gives [A00, A10, A20, ..., A01, A11, A21 ...]
-        # So take the transpose before flattening to get the vector corresponding
-        # to the Fenics representation
-        field_vals = np.transpose(field_vals).reshape(-1)
+        # Fenics represents this vector as
+        #  [A00, A01, A10, A11, A20, A21 ...],
+        # which is what we get by calling np.reshape(A, -1)
+        field_vals = field_vals.reshape(-1)
         return field_vals
 
 
@@ -266,7 +264,7 @@ if __name__ == "__main__":
             trunc_coords,
         )
 
-        return np.mean((fields - trunc_true_fields) ** 2)
+        return np.sqrt(np.mean((fields - trunc_true_fields) ** 2))
 
     @jax.jit
     def validation_losses(model):
