@@ -170,33 +170,36 @@ if __name__ == "__main__":
         model, fenics_functions, sources, bc_params, geo_params
     ):
         keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
-        M = len(fenics_functions)
-        for j in range(int(np.ceil(M / 10))):
-            ffs = fenics_functions[j * 10 : (j + 1) * 10]
-            N = len(ffs)
-            assert N % 2 == 0
-            for i in range(N):
-                ground_truth = fenics_functions[i]
-                # top two rows are optimizer.target
-                potentials = make_potential_func(
-                    keys[i],
-                    model,
-                    sources[i],
-                    bc_params[i],
-                    geo_params[i],
-                    ground_truth.function_space().tabulate_dof_coordinates(),
-                )
+        N = len(fenics_functions)
+        assert N % 2 == 0
+        for i in range(N):
+            ground_truth = fenics_functions[i]
+            # top two rows are optimizer.target
+            potentials = make_potential_func(
+                keys[i],
+                model,
+                sources[i],
+                bc_params[i],
+                geo_params[i],
+                ground_truth.function_space().tabulate_dof_coordinates(),
+            )
 
-                u_approx = fa.Function(ground_truth.function_space())
-                potentials.reshape(np.array(u_approx.vector()[:]).shape)
-                u_approx.vector().set_local(potentials)
+            u_approx = fa.Function(ground_truth.function_space())
+            potentials.reshape(np.array(u_approx.vector()[:]).shape)
+            u_approx.vector().set_local(potentials)
 
-                plt.subplot(2, N, 1 + i)
+            u_diff = fa.Function(ground_truth.function_space())
+            u_diff.vector().set_local(potentials - np.array(ground_truth.vector()[:]))
 
-                fa.plot(u_approx, title="Approx")
-                # bottom two rots are ground truth
-                plt.subplot(2, N, 1 + i + N)
-                fa.plot(ground_truth, title="Truth")
+            plt.subplot(3, N, 1 + i)
+
+            fa.plot(u_approx, title="Approx")
+            # bottom two rots are ground truth
+            plt.subplot(3, N, 1 + i + N)
+            fa.plot(ground_truth, title="Truth")
+
+            plt.subplot(3, N, 1 + 2*N + i)
+            fa.plot(u_diff, title="Difference", mode="displacement")
 
 
     @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
@@ -219,7 +222,7 @@ if __name__ == "__main__":
             trunc_coords,
         )
 
-        return np.mean((potentials - trunc_true_potentials) ** 2)
+        return np.sqrt(np.mean((potentials - trunc_true_potentials) ** 2))
 
 
     @jax.jit
@@ -268,14 +271,14 @@ if __name__ == "__main__":
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
                 maml_def, subkey, optimizer.target,
             )
-            meta_grad_norm = np.sqrt(jax.tree_util.tree_reduce(lambda x, y: x+y, 
+            meta_grad_norm = np.sqrt(jax.tree_util.tree_reduce(lambda x, y: x+y,
                 jax.tree_util.tree_map(lambda x: np.sum(x**2), meta_grad)))
             if np.isfinite(meta_grad_norm):
                 if meta_grad_norm > 1.:
                     log("clipping gradients with norm {}".format(
                         meta_grad_norm))
                     meta_grad = jax.tree_util.tree_map(
-                        lambda x: x/meta_grad_norm, meta_grad)  
+                        lambda x: x/meta_grad_norm, meta_grad)
                 optimizer = optimizer.apply_gradient(meta_grad)
 
         val_error = vmap_validation_error(

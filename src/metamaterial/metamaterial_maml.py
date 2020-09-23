@@ -213,35 +213,39 @@ if __name__ == "__main__":
         model, fenics_functions, sources, bc_params, geo_params
     ):
         keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
-        M = len(fenics_functions)
-        for j in range(int(np.ceil(M / 10))):
-            ffs = fenics_functions[j * 10 : (j + 1) * 10]
-            N = len(ffs)
-            assert N % 2 == 0
-            for i in range(N):
-                ground_truth = fenics_functions[i]
-                # top two rows are optimizer.target
-                field_vals = make_field_func(
-                    keys[i],
-                    model,
-                    sources[i],
-                    bc_params[i],
-                    geo_params[i],
-                    ground_truth.function_space().tabulate_dof_coordinates()[::2],
-                ).astype(np.float32)
+        N = len(fenics_functions)
+        assert N % 2 == 0
+        for i in range(N):
+            ground_truth = fenics_functions[i]
+            # top two rows are optimizer.target
+            field_vals = make_field_func(
+                keys[i],
+                model,
+                sources[i],
+                bc_params[i],
+                geo_params[i],
+                ground_truth.function_space().tabulate_dof_coordinates()[::2],
+            ).astype(np.float32)
 
-                u_approx = fa.Function(ground_truth.function_space())
-                assert len(field_vals) == len(np.array(u_approx.vector()[:]))
-                assert len(np.array(u_approx.vector()[:]).shape) == 1
+            u_approx = fa.Function(ground_truth.function_space())
 
-                u_approx.vector().set_local(field_vals)
+            assert len(field_vals) == len(np.array(u_approx.vector()[:]))
+            assert len(np.array(u_approx.vector()[:]).shape) == 1
 
-                plt.subplot(2, N, 1 + i)
+            u_approx.vector().set_local(field_vals)
 
-                fa.plot(u_approx, title="Approx", mode="displacement")
-                # bottom two rots are ground truth
-                plt.subplot(2, N, 1 + N + i)
-                fa.plot(ground_truth, title="Truth", mode="displacement")
+            u_diff = fa.Function(ground_truth.function_space())
+            u_diff.vector().set_local(field_vals - np.array(ground_truth.vector()[:]))
+
+            plt.subplot(3, N, 1 + i)
+
+            fa.plot(u_approx, title="Approx", mode="displacement")
+            # bottom two rots are ground truth
+            plt.subplot(3, N, 1 + N + i)
+            fa.plot(ground_truth, title="Truth", mode="displacement")
+
+            plt.subplot(3, N, 1 + 2*N + i)
+            fa.plot(u_diff, title="Difference", mode="displacement")
 
 
     @jax.jit

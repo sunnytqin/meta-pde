@@ -32,13 +32,13 @@ parser.add_argument(
     help="finite elements along one edge of cell; "
     " Overvelde&Bertoldi use about sqrt(1000)",
     type=int,
-    default=30,
+    default=50,
 )
 parser.add_argument(
     "--pore_radial_resolution",
     help="num points used to define geometry of pore boundary",
     type=int,
-    default=60,
+    default=120,
 )
 parser.add_argument(
     "--n_cells", help="number cells on one side of ref volume", type=int, default=1
@@ -113,7 +113,7 @@ def solve_fenics(source_params, bc_params, geo_params):
     with Timer() as t:
         if bc_params is not None:
 
-            dofs = mm.V.tabulate_dof_coordinates().reshape(-1, 2, 2)[:, 0, :]
+            dofs = mm.V.tabulate_dof_coordinates()[::2]
             outputs = vmap_boundary_conditions(dofs, bc_params)
             bc_vec = outputs.reshape(-1)
 
