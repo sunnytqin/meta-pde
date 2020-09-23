@@ -352,7 +352,7 @@ if __name__ == "__main__":
             if args.expt_name is not None:
                 plt.savefig(
                     os.path.join(
-                        args.out_dir, expt_name + "_viz_step_{}.png".format(step)
+                        args.out_dir, args.expt_name + "_viz_step_{}.png".format(step)
                     )
                 )
             else:
