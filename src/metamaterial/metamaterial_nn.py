@@ -61,6 +61,9 @@ parser.add_argument(
 parser.add_argument(
     "--bc_weight", type=float, default=1.0, help="weight on outer boundary loss",
 )
+parser.add_argument(
+    "--domain_weight", type=float, default=1.0, help="weight on domain loss",
+)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--out_dir", type=str, default="mm_results")
 parser.add_argument("--expt_name", type=str, default=None)
@@ -103,7 +106,8 @@ if __name__ == "__main__":
         )(optimizer.target)
 
         domain_loss, domain_grad = jax.value_and_grad(
-            lambda model: domain_loss_fn(points_in_domain, model, source_params)
+            lambda model: args.domain_weight * 
+            domain_loss_fn(points_in_domain, model, source_params)
         )(optimizer.target)
 
         interior_boundary_loss, interior_boundary_grad = jax.value_and_grad(
