@@ -12,6 +12,18 @@ from ..util.timer import Timer
 DTYPE = np.float32
 
 
+def divergence(u, x):
+    dudx = jax.jacfwd(u)(x)
+    return np.trace(dudx)
+
+
+def tensor_divergence(u, x):
+    # u(x) is d x d
+    dudx = jax.jacfwd(u)(x)  # d x d x d
+    return np.concatenate([dudx[:, 0, 0], dudx[:, 1, 1]]).transpose()
+
+
+
 def interior_bc_loss_fn(points_on_interior_boundary, u, geo_params, source_params):
     # pdb.set_trace()
     lossval = vmap(partial(interior_bc, geo_params, source_params, u))(
@@ -29,8 +41,9 @@ def boundary_loss_fn(points_on_boundary, field_fn, bc_params):
 
 
 def domain_loss_fn(points_in_domain, field_fn, source_params):
-    err_in_domain = vmap_nhe(points_in_domain, field_fn, source_params).reshape(-1, 1)
-    loss_in_domain = (err_in_domain ** 2).mean()
+    loss_in_domain = np.sum(vmap_nhe_violation(
+        points_in_domain, field_fn, source_params))
+    # loss_in_domain = (err_in_domain ** 2).mean()
     return loss_in_domain
 
 
@@ -83,6 +96,11 @@ def neo_hookean_energy(u, source_params, x):
     energy = (shear_mod / 2) * (Jinv * I1 - 2) + (bulk_mod / 2) * (J - 1) ** 2
 
     return energy
+
+
+def first_pk_div_sumsq(u, source_params, x):
+    return np.sum(tensor_divergence(
+        lambda x: first_pk_stress(u, source_params, x), x)**2)
 
 
 def inv2d(A):
@@ -149,6 +167,10 @@ def second_pk_stress(u, source_params, x):
 
 def vmap_nhe(x, u, source_params):
     return vmap(partial(neo_hookean_energy, u, source_params))(x).reshape(-1, 1)
+
+
+def vmap_nhe_violation(x, u, source_params):
+    return vmap(partial(first_pk_div_sumsq, u, source_params))(x).reshape(-1, 1)
 
 
 def interior_bc(geo_params, source_params, u, x):
