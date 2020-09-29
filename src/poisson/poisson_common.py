@@ -118,9 +118,7 @@ def vmap_boundary_conditions(points_on_boundary, bc_params):
 @jax.jit
 def source(r, x):
     x = x.reshape([1, -1]) * np.ones([r.shape[0], x.shape[0]])
-    results = (
-        r[:, 2] * np.exp(-((x[:, 0] - r[:, 0]) ** 2 + (x[:, 1] - r[:, 1]) ** 2))
-    )
+    results = r[:, 2] * np.exp(-((x[:, 0] - r[:, 0]) ** 2 + (x[:, 1] - r[:, 1]) ** 2))
     return results.sum()
 
 

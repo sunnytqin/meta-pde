@@ -35,7 +35,7 @@ MamlDef = namedtuple(
 )
 
 
-def maml_inner_step(key, opt, inner_loss_fn):
+def maml_inner_step(key, opt, inner_loss_fn, inner_lr):
     """Inner step of MAML single-task rollout. It's just SGD or some other optim.
 
     Args:
@@ -50,14 +50,18 @@ def maml_inner_step(key, opt, inner_loss_fn):
     """
 
     # differentiate w.r.t arg1 because args to inner loss are (key, model)
-    loss_and_grad_fn = jax.value_and_grad(inner_loss_fn, argnums=1)
+    loss_and_grad_fn = jax.value_and_grad(
+        lambda *args: inner_lr * inner_loss_fn(*args), argnums=1
+    )
 
     loss, grad = loss_and_grad_fn(key, opt.target)
     new_opt = opt.apply_gradient(grad)
     return new_opt, loss
 
 
-def single_task_rollout(maml_def, rollout_key, initial_model, inner_loss_fn):
+def single_task_rollout(
+    maml_def, rollout_key, initial_model, inner_loss_fn, inner_lrs=None
+):
     """Roll out meta learned model on one task. Use for both training and deployment.
 
     Computes the final model, and the per-inner-loop step losses.
@@ -75,47 +79,63 @@ def single_task_rollout(maml_def, rollout_key, initial_model, inner_loss_fn):
         meta_loss: the outer loss, e.g. the "test loss" on the given task
     """
 
-    inner_key, loss_final_key = jax.random.split(rollout_key, 2)
-    inner_keys = jax.random.split(inner_key, maml_def.inner_steps)
+    if inner_lrs is None:
+        inner_lrs = np.ones(maml_def.inner_steps)
 
-    body_fn = lambda opt, key: maml_inner_step(key, opt, inner_loss_fn)
+    def body_fn(carry, lr):
+        opt, key = carry
+        k1, k2 = jax.random.split(key)
+        opt, loss = maml_inner_step(k1, opt, inner_loss_fn, lr)
+        return (opt, k2), loss
 
     inner_opt = maml_def.make_inner_opt(initial_model)
 
+    print(maml_def.inner_steps)
+    print(inner_lrs)
+
     # Loop over the body_fn for each inner_step, carrying opt and stacking losses
-    final_opt, losses = jax.lax.scan(
-        body_fn, inner_opt, inner_keys, length=maml_def.inner_steps
+    (final_opt, final_key), losses = jax.lax.scan(
+        body_fn, (inner_opt, rollout_key), inner_lrs, length=maml_def.inner_steps
     )
 
     # Cat the final loss to loss array (to have losses before and after each grad step)
-    loss_final = inner_loss_fn(loss_final_key, final_opt.target)
+    loss_final = inner_loss_fn(final_key, final_opt.target)
     losses = np.concatenate((losses, np.array([loss_final])))
 
     return final_opt.target, losses
 
 
 @partial(jax.jit, static_argnums=0)
-def single_task_grad_and_losses(maml_def, key, initial_model):
+def single_task_grad_and_losses(maml_def, key, initial_model, inner_lrs=None):
     """Make the task losses, do rollout, and compute the meta-gradient"""
     task_key, rollout_key, outer_loss_key = jax.random.split(key, 3)
     inner_loss_fn, outer_loss_fn = maml_def.make_task_loss_fns(task_key)
 
-    def task_rollout_and_eval(initial_model):
+    def task_rollout_and_eval(model_and_lrs):
+        model, lrs = model_and_lrs
         final_model, losses = single_task_rollout(
-            maml_def, rollout_key, initial_model, inner_loss_fn
+            maml_def, rollout_key, model, inner_loss_fn, lrs
         )
         outer_loss = outer_loss_fn(outer_loss_key, final_model)
         return outer_loss, losses
 
     (meta_loss, losses), meta_grad = jax.value_and_grad(
         task_rollout_and_eval, has_aux=True
-    )(initial_model)
+    )(
+        (
+            initial_model,
+            inner_lrs if inner_lrs is not None else np.ones(maml_def.inner_steps),
+        )
+    )
+
+    if inner_lrs is None:
+        meta_grad = meta_grad[0]  # Just get model grad not lrs grad
 
     return meta_grad, losses, meta_loss
 
 
 @partial(jax.jit, static_argnums=0)
-def multi_task_grad_and_losses(maml_def, key, initial_model):
+def multi_task_grad_and_losses(maml_def, key, initial_model, inner_lrs=None):
     """Roll out meta learner across *multiple* tasks, collecting MAML gradients.
 
     Args:
@@ -131,8 +151,8 @@ def multi_task_grad_and_losses(maml_def, key, initial_model):
 
     # Get the grads and losses for each task in parallel
     grads, losses, meta_losses = jax.vmap(
-        single_task_grad_and_losses, in_axes=(None, 0, None)
-    )(maml_def, keys, initial_model)
+        single_task_grad_and_losses, in_axes=(None, 0, None, None)
+    )(maml_def, keys, initial_model, inner_lrs)
 
     # Average the gradient over the tasks
     grads = jax.tree_util.tree_map(lambda g: g.mean(axis=0), grads)

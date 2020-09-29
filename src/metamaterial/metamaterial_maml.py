@@ -28,8 +28,11 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=2, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=2, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=1e-6, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=3e-6, help="outer learning rate")
+parser.add_argument(
+    "--lr_inner_lr", type=float, default=1e-2, help="lr for inner learning rate"
+)
+parser.add_argument("--inner_lr", type=float, default=1e-3, help="inner learning rate")
+parser.add_argument("--outer_lr", type=float, default=3e-5, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
@@ -42,33 +45,35 @@ parser.add_argument(
     default=32,
     help="num support points on the boundary and in domain",
 )
-parser.add_argument("--gridsize", type=int, default=128,
-                    help="gridsize for sampling")
+parser.add_argument("--gridsize", type=int, default=128, help="gridsize for sampling")
 parser.add_argument("--inner_steps", type=int, default=2, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e4), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
 parser.add_argument("--n_fourier", type=int, default=None, help="num fourier features")
-parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size")
+parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size")
 parser.add_argument("--siren", type=int, default=0, help="1 for true")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
-parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
+parser.add_argument("--vary_source", type=int, default=0, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument(
-    "--bc_scale", type=float, default=0.05, help="scale of bc displacement"
+    "--bc_scale", type=float, default=0.15, help="scale of bc displacement"
+)
+parser.add_argument(
+    "--bc_weight", type=float, default=100.0, help="weight on outer boundary loss",
+)
+parser.add_argument(
+    "--domain_weight", type=float, default=1e-5, help="weight on domain loss",
 )
 parser.add_argument(
     "--interior_weight",
     type=float,
-    default=1.0,
+    default=1e-4,
     help="weight on interior boundary loss",
-)
-parser.add_argument(
-    "--bc_weight", type=float, default=1.0, help="weight on outer boundary loss",
 )
 parser.add_argument("--out_dir", type=str, default="mm_meta_results")
 parser.add_argument("--expt_name", type=str, default=None)
-parser.add_argument("--viz_every", type=int, default=0, help="plot every N steps")
+parser.add_argument("--viz_every", type=int, default=10000, help="plot every N steps")
 
 
 if __name__ == "__main__":
@@ -109,41 +114,50 @@ if __name__ == "__main__":
 
         return (
             args.bc_weight * boundary_loss
-            + domain_loss
+            + args.domain_weight * domain_loss
             + args.interior_weight * interior_loss
         )
-
 
     def make_task_loss_fns(key):
         # The input key is terminal
         k1, k2, k3, k4, k5, k6, k7 = jax.random.split(key, 7)
+
         source_params, bc_params, geo_params = sample_params(k1, args)
-        outer_in_domain = sample_points_in_domain(k2, args.outer_points,
-                                                  args.gridsize, geo_params)
-        outer_on_boundary = sample_points_on_boundary(
-            k3, args.outer_points, geo_params
+        outer_in_domain = sample_points_in_domain(
+            k2, args.outer_points, args.gridsize, geo_params
         )
+        outer_on_boundary = sample_points_on_boundary(k3, args.outer_points, geo_params)
         outer_on_interior = sample_points_on_interior_boundary(
             k4, args.outer_points, geo_params
         )
-        inner_in_domain = sample_points_in_domain(k5, args.inner_points, args.gridsize,
-                                                  geo_params)
+        inner_in_domain = sample_points_in_domain(
+            k5, args.inner_points, args.gridsize, geo_params
+        )
         inner_on_boundary = sample_points_on_boundary(k6, args.inner_points, geo_params)
         inner_on_interior = sample_points_on_interior_boundary(
             k7, args.inner_points, geo_params
         )
         inner_loss = lambda key, field_fn: loss_fn(
-            field_fn, inner_on_boundary, inner_in_domain, inner_on_interior,
-            source_params, bc_params, geo_params
+            field_fn,
+            inner_on_boundary,
+            inner_in_domain,
+            inner_on_interior,
+            source_params,
+            bc_params,
+            geo_params,
         )
         outer_loss = lambda key, field_fn: loss_fn(
-            field_fn, outer_on_boundary, outer_in_domain, outer_on_interior,
-            source_params, bc_params, geo_params
+            field_fn,
+            outer_on_boundary,
+            outer_in_domain,
+            outer_on_interior,
+            source_params,
+            bc_params,
+            geo_params,
         )
         return inner_loss, outer_loss
 
-
-    make_inner_opt = flax.optim.Adam(learning_rate=args.inner_lr).create
+    make_inner_opt = flax.optim.Momentum(learning_rate=args.inner_lr, beta=0.0).create
 
     maml_def = maml.MamlDef(
         make_inner_opt=make_inner_opt,
@@ -151,6 +165,8 @@ if __name__ == "__main__":
         inner_steps=args.inner_steps,
         n_batch_tasks=args.bsize,
     )
+
+    inner_lrs = np.ones(maml_def.inner_steps)
 
     Field = NeuralField.partial(
         sizes=[args.layer_size for _ in range(args.num_layers)],
@@ -164,8 +180,8 @@ if __name__ == "__main__":
     _, init_params = Field.init_by_shape(subkey, [((1, 2), DTYPE)])
 
     optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(
-        flax.nn.Model(Field, init_params))
-
+        flax.nn.Model(Field, init_params)
+    )
 
     def get_ground_truth_points(source_params_list, bc_params_list, geo_params_list):
         fenics_functions = []
@@ -177,27 +193,39 @@ if __name__ == "__main__":
             fenics_functions.append(ground_truth)
             true_fields.append(np.array(ground_truth.vector()[:]).astype(DTYPE))
             coords.append(
-                np.array(ground_truth.function_space().tabulate_dof_coordinates()
-                    )[::2].astype(DTYPE)
+                np.array(ground_truth.function_space().tabulate_dof_coordinates())[
+                    ::2
+                ].astype(DTYPE)
             )
         return fenics_functions, true_fields, coords
 
-
     @jax.jit
     def make_field_func(
-        key, model, source_params, bc_params, geo_params, coords
+        key, model_and_lrs, source_params, bc_params, geo_params, coords
     ):
+        model, inner_lrs = model_and_lrs
         # Input key is terminal
         k1, k2, k3, k4 = jax.random.split(key, 4)
-        inner_in_domain = sample_points_in_domain(k1, args.inner_points, args.gridsize, geo_params)
+        inner_in_domain = sample_points_in_domain(
+            k1, args.inner_points, args.gridsize, geo_params
+        )
         inner_on_boundary = sample_points_on_boundary(k2, args.inner_points, geo_params)
-        inner_on_interior = sample_points_on_interior_boundary(k3, args.inner_points, geo_params)
+        inner_on_interior = sample_points_on_interior_boundary(
+            k3, args.inner_points, geo_params
+        )
 
         inner_loss_fn = lambda key, field_fn: loss_fn(
-            field_fn, inner_on_boundary, inner_in_domain, inner_on_interior,
-            source_params, bc_params, geo_params
+            field_fn,
+            inner_on_boundary,
+            inner_in_domain,
+            inner_on_interior,
+            source_params,
+            bc_params,
+            geo_params,
         )
-        final_model, _ = maml.single_task_rollout(maml_def, k4, model, inner_loss_fn)
+        final_model, _ = maml.single_task_rollout(
+            maml_def, k4, model, inner_loss_fn, inner_lrs
+        )
 
         field_vals = np.squeeze(final_model(coords))
         # We have something of shape [n_dofs, 2] = Aij, i=1..n_dovs, j=1,2
@@ -208,9 +236,8 @@ if __name__ == "__main__":
         field_vals = field_vals.reshape(-1)
         return field_vals
 
-
     def compare_plots_with_ground_truth(
-        model, fenics_functions, sources, bc_params, geo_params
+        model_and_lrs, fenics_functions, sources, bc_params, geo_params
     ):
         keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
         N = len(fenics_functions)
@@ -220,7 +247,7 @@ if __name__ == "__main__":
             # top two rows are optimizer.target
             field_vals = make_field_func(
                 keys[i],
-                model,
+                model_and_lrs,
                 sources[i],
                 bc_params[i],
                 geo_params[i],
@@ -244,13 +271,12 @@ if __name__ == "__main__":
             plt.subplot(3, N, 1 + N + i)
             fa.plot(ground_truth, title="Truth", mode="displacement")
 
-            plt.subplot(3, N, 1 + 2*N + i)
+            plt.subplot(3, N, 1 + 2 * N + i)
             fa.plot(u_diff, title="Difference", mode="displacement")
-
 
     @jax.jit
     def vmap_validation_error(
-        model,
+        model_and_lrs,
         ground_truth_source,
         ground_truth_bc,
         ground_truth_geo,
@@ -261,7 +287,7 @@ if __name__ == "__main__":
         keys = jax.random.split(key, args.n_eval)
         fields = vmap(make_field_func, (0, None, 0, 0, 0, 0))(
             keys,
-            model,
+            model_and_lrs,
             ground_truth_source,
             ground_truth_bc,
             ground_truth_geo,
@@ -271,9 +297,9 @@ if __name__ == "__main__":
         return np.sqrt(np.mean((fields - trunc_true_fields) ** 2))
 
     @jax.jit
-    def validation_losses(model):
+    def validation_losses(model_and_lrs):
         _, losses, meta_losses = maml.multi_task_grad_and_losses(
-            maml_def, jax.random.PRNGKey(0), model,
+            maml_def, jax.random.PRNGKey(0), model_and_lrs[0], model_and_lrs[1],
         )
         return losses, meta_losses
 
@@ -282,6 +308,7 @@ if __name__ == "__main__":
     key, gt_key = jax.random.split(key, 2)
 
     gt_keys = jax.random.split(gt_key, args.n_eval)
+
     ground_truth_source, ground_truth_bc, ground_truth_geo = vmap(
         sample_params, (0, None)
     )(gt_keys, args)
@@ -301,20 +328,25 @@ if __name__ == "__main__":
 
         with Timer() as t:
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
-                maml_def, subkey, optimizer.target,
+                maml_def, subkey, optimizer.target, inner_lrs
             )
-            meta_grad_norm = np.sqrt(jax.tree_util.tree_reduce(lambda x, y: x+y,
-                jax.tree_util.tree_map(lambda x: np.sum(x**2), meta_grad)))
+            meta_grad_norm = np.sqrt(
+                jax.tree_util.tree_reduce(
+                    lambda x, y: x + y,
+                    jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad),
+                )
+            )
             if np.isfinite(meta_grad_norm):
-                if meta_grad_norm > 1.:
-                    log("clipping gradients with norm {}".format(
-                        meta_grad_norm))
+                if meta_grad_norm > 10.0:
+                    log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad = jax.tree_util.tree_map(
-                        lambda x: x/meta_grad_norm, meta_grad)
-                optimizer = optimizer.apply_gradient(meta_grad)
+                        lambda x: 10.0 * x / meta_grad_norm, meta_grad
+                    )
+                optimizer = optimizer.apply_gradient(meta_grad[0])
+                inner_lrs = inner_lrs - args.lr_inner_lr * meta_grad[1]
 
         val_error = vmap_validation_error(
-            optimizer.target,
+            (optimizer.target, inner_lrs),
             ground_truth_source,
             ground_truth_bc,
             ground_truth_geo,
@@ -322,12 +354,16 @@ if __name__ == "__main__":
             trunc_true_fields,
         )
 
-        val_losses, val_meta_losses = validation_losses(optimizer.target)
+        val_losses, val_meta_losses = validation_losses((optimizer.target, inner_lrs))
 
         log(
             "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, meta_grad_norm: {}, time: {}".format(
-                step, np.mean(meta_losses), np.mean(val_meta_losses),
-                val_error, meta_grad_norm, t.interval
+                step,
+                np.mean(meta_losses),
+                np.mean(val_meta_losses),
+                val_error,
+                meta_grad_norm,
+                t.interval,
             )
         )
         log(
@@ -339,7 +375,7 @@ if __name__ == "__main__":
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
             compare_plots_with_ground_truth(
-                optimizer.target,
+                (optimizer.target, inner_lrs),
                 fenics_functions,
                 ground_truth_source,
                 ground_truth_bc,
@@ -361,13 +397,14 @@ if __name__ == "__main__":
                 )
             else:
                 plt.show()
+            plt.close()
 
     if args.expt_name is not None:
         outfile.close()
 
     plt.figure()
     compare_plots_with_ground_truth(
-        optimizer.target,
+        (optimizer.target, inner_lrs),
         fenics_functions,
         ground_truth_source,
         ground_truth_bc,
@@ -377,3 +414,4 @@ if __name__ == "__main__":
         plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))
     else:
         plt.show()
+    plt.close()

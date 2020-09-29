@@ -23,7 +23,6 @@ def tensor_divergence(u, x):
     return np.concatenate([dudx[:, 0, 0], dudx[:, 1, 1]]).transpose()
 
 
-
 def interior_bc_loss_fn(points_on_interior_boundary, u, geo_params, source_params):
     # pdb.set_trace()
     lossval = vmap(partial(interior_bc, geo_params, source_params, u))(
@@ -41,8 +40,9 @@ def boundary_loss_fn(points_on_boundary, field_fn, bc_params):
 
 
 def domain_loss_fn(points_in_domain, field_fn, source_params):
-    loss_in_domain = np.sum(vmap_nhe_violation(
-        points_in_domain, field_fn, source_params))
+    loss_in_domain = np.sum(
+        vmap_nhe_violation(points_in_domain, field_fn, source_params)
+    )
     # loss_in_domain = (err_in_domain ** 2).mean()
     return loss_in_domain
 
@@ -98,9 +98,37 @@ def neo_hookean_energy(u, source_params, x):
     return energy
 
 
+def nhe_given_F(F, source_params):
+    young_mod, poisson_ratio = source_params
+    shear_mod = young_mod / (2 * (1 + poisson_ratio))
+    bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
+    J = np.linalg.det(F)
+    rcg = np.matmul(F.transpose(), F)  # right cauchy green
+    Jinv = 1.0 / (J + 1e-14)
+    I1 = np.trace(rcg)  # first invariant
+
+    energy = (shear_mod / 2) * (Jinv * I1 - 2) + (bulk_mod / 2) * (J - 1) ** 2
+    return energy
+
+
+def first_pk_ad(u, source_params, x):
+    young_mod, poisson_ratio = source_params
+    # if poisson_ratio >= 0.5:
+    #    raise ValueError(
+    #        "Poisson's ratio must be below isotropic upper limit 0.5. Found {}".format(
+    #            poisson_ratio
+    #        )
+    #    )
+    shear_mod = young_mod / (2 * (1 + poisson_ratio))
+    bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
+
+    x = x.reshape(2)
+    F = defgrad(u)(x)
+    return jax.grad(nhe_given_F)(F, source_params)
+
+
 def first_pk_div_sumsq(u, source_params, x):
-    return np.sum(tensor_divergence(
-        lambda x: first_pk_stress(u, source_params, x), x)**2)
+    return np.sum(tensor_divergence(lambda x: first_pk_ad(u, source_params, x), x) ** 2)
 
 
 def inv2d(A):
@@ -124,7 +152,7 @@ def first_pk_stress(u, source_params, x):
     shear_mod = young_mod / (2 * (1 + poisson_ratio))
     bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
 
-    x = x.reshape(2)
+    # x = x.reshape(2)
     F = defgrad(u)(x)
     J = np.linalg.det(F)
     rcg = np.matmul(F.transpose(), F)  # right cauchy green
@@ -195,7 +223,7 @@ def interior_bc(geo_params, source_params, u, x):
     normal = (normal / np.linalg.norm(normal)).reshape(2, 1)
 
     # Non-stationary dispacements, i.e. du_dx = 0
-    pk = first_pk_stress(u, source_params, x)  # dForce / dx
+    pk = first_pk_ad(u, source_params, x)  # dForce / dx
     assert len(pk.shape) == 2 and pk.shape[0] == 2 and pk.shape[1] == 2
 
     pk_dot_n = np.matmul(pk, normal)
@@ -294,9 +322,9 @@ sample_points_in_domain = sample_points_in_domain_rejection
 def sample_params(key, args):
     k1, k2, k3, k4 = jax.random.split(key, 4)
     if args.vary_bc:
-        bc_params = args.bc_scale * jax.random.uniform(k1, shape=(2, 7,),
-                                                       minval=-1.,
-                                                       maxval=1., dtype=DTYPE)
+        bc_params = args.bc_scale * jax.random.uniform(
+            k1, shape=(2, 7,), minval=-1.0, maxval=1.0, dtype=DTYPE
+        )
     else:
         bc_params = np.zeros([2, 5], dtype=DTYPE)
     if args.vary_geometry:
@@ -335,17 +363,17 @@ def boundary_conditions(r, x):
                 r[0, 0]
                 + r[0, 1] * np.cos(theta)
                 + r[0, 2] * np.sin(theta)
-                + r[0, 3] * np.cos(2 * theta)/2
-                + r[0, 4] * np.sin(2 * theta)/2
-                + r[0, 5] * np.cos(4 * theta)/4
-                + r[0, 6] * np.sin(4 * theta)/4,
+                + r[0, 3] * np.cos(2 * theta) / 2
+                + r[0, 4] * np.sin(2 * theta) / 2
+                + r[0, 5] * np.cos(4 * theta) / 4
+                + r[0, 6] * np.sin(4 * theta) / 4,
                 r[1, 0]
                 + r[1, 1] * np.cos(theta)
                 + r[1, 2] * np.sin(theta)
-                + r[1, 3] * np.cos(2 * theta)/2
-                + r[1, 4] * np.sin(2 * theta)/2
-                + r[1, 5] * np.cos(4 * theta)/4
-                + r[1, 6] * np.sin(4 * theta)/4,
+                + r[1, 3] * np.cos(2 * theta) / 2
+                + r[1, 4] * np.sin(2 * theta) / 2
+                + r[1, 5] * np.cos(4 * theta) / 4
+                + r[1, 6] * np.sin(4 * theta) / 4,
             ]
         )
 
