@@ -110,13 +110,17 @@ if __name__ == "__main__":
             optimizer.target
         )
         grad_bc_norm = np.sqrt(
-            jax.tree_util.tree_reduce(lambda x, y: x+y,
-                jax.tree_util.tree_map(lambda x: np.sum(x**2), grad_bc)
-        ))
+            jax.tree_util.tree_reduce(
+                lambda x, y: x + y,
+                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), grad_bc),
+            )
+        )
         grad_bc_norm = np.sqrt(
-            jax.tree_util.tree_reduce(lambda x, y: x+y,
-                jax.tree_util.tree_map(lambda x: np.sum(x**2), grad_dom)
-        ))
+            jax.tree_util.tree_reduce(
+                lambda x, y: x + y,
+                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), grad_dom),
+            )
+        )
         if args.pcgrad > 0.0:
             project = partial(pcgrad.project_grads, args.pcgrad)
             grad_bc_ = jax.tree_multimap(project, grad_bc, grad_dom)

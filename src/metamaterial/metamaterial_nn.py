@@ -38,8 +38,7 @@ parser.add_argument(
     default=2048,
     help="num points inside the domain for inner loss",
 )
-parser.add_argument("--gridsize", type=int, default=128,
-                    help="gridsize for sampling")
+parser.add_argument("--gridsize", type=int, default=128, help="gridsize for sampling")
 parser.add_argument("--outer_steps", type=int, default=int(1e4), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
 parser.add_argument("--n_fourier", type=int, default=None, help="num fourier features")
@@ -106,8 +105,8 @@ if __name__ == "__main__":
         )(optimizer.target)
 
         domain_loss, domain_grad = jax.value_and_grad(
-            lambda model: args.domain_weight * 
-            domain_loss_fn(points_in_domain, model, source_params)
+            lambda model: args.domain_weight
+            * domain_loss_fn(points_in_domain, model, source_params)
         )(optimizer.target)
 
         interior_boundary_loss, interior_boundary_grad = jax.value_and_grad(
@@ -118,17 +117,25 @@ if __name__ == "__main__":
         )(optimizer.target)
 
         boundary_grad_norm = np.sqrt(
-            jax.tree_util.tree_reduce(lambda x, y: x+y,
-                jax.tree_util.tree_map(lambda x: np.sum(x**2), boundary_grad)
-        ))
+            jax.tree_util.tree_reduce(
+                lambda x, y: x + y,
+                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), boundary_grad),
+            )
+        )
         domain_grad_norm = np.sqrt(
-            jax.tree_util.tree_reduce(lambda x, y: x+y,
-                jax.tree_util.tree_map(lambda x: np.sum(x**2), domain_grad)
-        ))
+            jax.tree_util.tree_reduce(
+                lambda x, y: x + y,
+                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), domain_grad),
+            )
+        )
         interior_boundary_grad_norm = np.sqrt(
-            jax.tree_util.tree_reduce(lambda x, y: x+y,
-                jax.tree_util.tree_map(lambda x: np.sum(x**2), interior_boundary_grad)
-        ))
+            jax.tree_util.tree_reduce(
+                lambda x, y: x + y,
+                jax.tree_util.tree_map(
+                    lambda x: np.sum(x ** 2), interior_boundary_grad
+                ),
+            )
+        )
 
         if args.pcgrad > 0.0:
             project = partial(pcgrad.project_grads, args.pcgrad)
@@ -213,8 +220,9 @@ if __name__ == "__main__":
     plt.savefig("mm_init.png")
 
     key, k1, k2, k3 = jax.random.split(key, 4)
-    points_in_domain_test = sample_points_in_domain(k1, args.domain_points,
-                                                    args.gridsize, geo_params)
+    points_in_domain_test = sample_points_in_domain(
+        k1, args.domain_points, args.gridsize, geo_params
+    )
     points_on_boundary_test = sample_points_on_boundary(
         k2, args.boundary_points, geo_params
     )
@@ -241,8 +249,9 @@ if __name__ == "__main__":
     for step in range(args.outer_steps):
         key, sk1, sk2, sk3 = jax.random.split(key, 4)
 
-        points_in_domain = sample_points_in_domain(sk1, args.domain_points,
-                                                   args.gridsize, geo_params)
+        points_in_domain = sample_points_in_domain(
+            sk1, args.domain_points, args.gridsize, geo_params
+        )
         points_on_boundary = sample_points_on_boundary(
             sk2, args.boundary_points, geo_params
         )

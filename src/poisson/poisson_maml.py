@@ -27,7 +27,6 @@ import os
 import argparse
 
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
@@ -65,7 +64,6 @@ parser.add_argument(
 if __name__ == "__main__":
     args = parser.parse_args()
 
-
     if args.expt_name is not None:
         if not os.path.exists(args.out_dir):
             os.mkdir(args.out_dir)
@@ -83,7 +81,6 @@ if __name__ == "__main__":
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
 
-
     # --------------------- Defining the meta-training algorithm --------------------
 
     def loss_fn(
@@ -100,9 +97,7 @@ if __name__ == "__main__":
         k1, k2, k3, k4, k5 = jax.random.split(key, 5)
         source_params, bc_params, geo_params = sample_params(k1, args)
         outer_in_domain = sample_points_in_domain(k2, args.outer_points, geo_params)
-        outer_on_boundary = sample_points_on_boundary(
-            k3, args.outer_points, geo_params
-        )
+        outer_on_boundary = sample_points_on_boundary(k3, args.outer_points, geo_params)
         inner_in_domain = sample_points_in_domain(k4, args.inner_points, geo_params)
         inner_on_boundary = sample_points_on_boundary(k5, args.inner_points, geo_params)
 
@@ -114,7 +109,7 @@ if __name__ == "__main__":
         )
         return inner_loss, outer_loss
 
-    make_inner_opt = flax.optim.Momentum(learning_rate=args.inner_lr, beta=0.).create
+    make_inner_opt = flax.optim.Momentum(learning_rate=args.inner_lr, beta=0.0).create
 
     maml_def = maml.MamlDef(
         make_inner_opt=make_inner_opt,
@@ -133,8 +128,8 @@ if __name__ == "__main__":
 
     _, init_params = Potential.init_by_shape(subkey, [((1, 2), DTYPE)])
     optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(
-        flax.nn.Model(Potential, init_params))
-
+        flax.nn.Model(Potential, init_params)
+    )
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -153,9 +148,7 @@ if __name__ == "__main__":
         return fenics_functions, potentials, coords
 
     @jax.jit
-    def make_potential_func(
-        key, model, source_params, bc_params, geo_params, coords
-    ):
+    def make_potential_func(key, model, source_params, bc_params, geo_params, coords):
         # Input key is terminal
         k1, k2, k3 = jax.random.split(key, 3)
         inner_in_domain = sample_points_in_domain(k1, args.inner_points, geo_params)
@@ -198,9 +191,8 @@ if __name__ == "__main__":
             plt.subplot(3, N, 1 + i + N)
             fa.plot(ground_truth, title="Truth")
 
-            plt.subplot(3, N, 1 + 2*N + i)
+            plt.subplot(3, N, 1 + 2 * N + i)
             fa.plot(u_diff, title="Difference", mode="displacement")
-
 
     @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
     def vmap_validation_error(
@@ -224,14 +216,12 @@ if __name__ == "__main__":
 
         return np.sqrt(np.mean((potentials - trunc_true_potentials) ** 2))
 
-
     @jax.jit
     def validation_losses(model):
         _, losses, meta_losses = maml.multi_task_grad_and_losses(
             maml_def, jax.random.PRNGKey(0), model,
         )
         return losses, meta_losses
-
 
     grid = npo.zeros([101, 101, 2])
     for i in range(101):
@@ -260,8 +250,6 @@ if __name__ == "__main__":
 
     trunc_coords = np.stack([c[: min([len(c) for c in coords])] for c in coords])
 
-
-
     # --------------------- Run MAML --------------------
 
     for step in range(args.outer_steps):
@@ -271,14 +259,18 @@ if __name__ == "__main__":
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
                 maml_def, subkey, optimizer.target,
             )
-            meta_grad_norm = np.sqrt(jax.tree_util.tree_reduce(lambda x, y: x+y,
-                jax.tree_util.tree_map(lambda x: np.sum(x**2), meta_grad)))
+            meta_grad_norm = np.sqrt(
+                jax.tree_util.tree_reduce(
+                    lambda x, y: x + y,
+                    jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad),
+                )
+            )
             if np.isfinite(meta_grad_norm):
-                if meta_grad_norm > 1.:
-                    log("clipping gradients with norm {}".format(
-                        meta_grad_norm))
+                if meta_grad_norm > 1.0:
+                    log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad = jax.tree_util.tree_map(
-                        lambda x: x/meta_grad_norm, meta_grad)
+                        lambda x: x / meta_grad_norm, meta_grad
+                    )
                 optimizer = optimizer.apply_gradient(meta_grad)
 
         val_error = vmap_validation_error(
@@ -295,12 +287,19 @@ if __name__ == "__main__":
         log(
             "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
             "meta_grad_norm: {}, time: {}".format(
-                step, np.mean(meta_losses), np.mean(val_meta_losses),
-                val_error, meta_grad_norm, t.interval
+                step,
+                np.mean(meta_losses),
+                np.mean(val_meta_losses),
+                val_error,
+                meta_grad_norm,
+                t.interval,
             )
         )
-        log("meta_loss_max: {}, meta_loss_min: {}, meta_loss_std: {}".format(
-            np.max(meta_losses), np.min(meta_losses), np.std(meta_losses)))
+        log(
+            "meta_loss_max: {}, meta_loss_min: {}, meta_loss_std: {}".format(
+                np.max(meta_losses), np.min(meta_losses), np.std(meta_losses)
+            )
+        )
         log(
             "per_step_losses: {}\nper_step_val_losses:{}\n".format(
                 np.mean(losses, axis=0), np.mean(val_losses, axis=0),
