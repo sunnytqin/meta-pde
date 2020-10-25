@@ -27,8 +27,9 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=32, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=32, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=1e-6, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=1e-5, help="outer learning rate")
+parser.add_argument("--n_plot", type=int, default=8, help="num eval tasks to plot")
+parser.add_argument("--inner_lr", type=float, default=1e-3, help="inner learning rate")
+parser.add_argument("--outer_lr", type=float, default=1e-6, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
@@ -52,7 +53,7 @@ parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument(
-    "--bc_scale", type=float, default=0.05, help="scale of bc displacement"
+    "--bc_scale", type=float, default=0.15, help="scale of bc displacement"
 )
 parser.add_argument(
     "--interior_weight",
@@ -61,7 +62,7 @@ parser.add_argument(
     help="weight on interior boundary loss",
 )
 parser.add_argument(
-    "--bc_weight", type=float, default=1.0, help="weight on outer boundary loss",
+    "--bc_weight", type=float, default=1e4, help="weight on outer boundary loss",
 )
 parser.add_argument("--out_dir", type=str, default="mm_meta_results")
 parser.add_argument("--expt_name", type=str, default=None)
@@ -246,35 +247,34 @@ if __name__ == "__main__":
     ):
         keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
         M = len(fenics_functions)
-        for j in range(int(np.ceil(M / 10))):
-            ffs = fenics_functions[j * 10 : (j + 1) * 10]
-            N = len(ffs)
-            assert N % 2 == 0
-            for i in range(N):
-                ground_truth = fenics_functions[i]
-                # top two rows are optimizer.target
-                field_vals = make_field_func(
-                    keys[i],
-                    optimizer,
-                    sources[i],
-                    bc_params[i],
-                    geo_params[i],
-                    ground_truth.function_space().tabulate_dof_coordinates()[::2],
-                    args,
-                ).astype(np.float32)
+        assert args.n_plot <= M
+        assert args.n_plot % 2 == 0
+        for i in range(args.n_plot):
+            ground_truth = fenics_functions[i]
+            # top two rows are optimizer.target
+            field_vals = make_field_func(
+                keys[i],
+                optimizer,
+                sources[i],
+                bc_params[i],
+                geo_params[i],
+                ground_truth.function_space().tabulate_dof_coordinates()[::2],
+                args,
+            ).astype(np.float32)
 
-                u_approx = fa.Function(ground_truth.function_space())
-                assert len(field_vals) == len(np.array(u_approx.vector()[:]))
-                assert len(np.array(u_approx.vector()[:]).shape) == 1
+            u_approx = fa.Function(ground_truth.function_space())
+            assert len(field_vals) == len(np.array(u_approx.vector()[:]))
+            assert len(np.array(u_approx.vector()[:]).shape) == 1
 
-                u_approx.vector().set_local(field_vals)
+            u_approx.vector().set_local(field_vals)
 
-                plt.subplot(4, N // 2, 1 + i)
+            plt.subplot(4, args.n_plot // 2, 1 + i)
 
-                fa.plot(u_approx, title="Approx", mode="displacement")
-                # bottom two rots are ground truth
-                plt.subplot(4, N // 2, 1 + N + i)
-                fa.plot(ground_truth, title="Truth", mode="displacement")
+            fa.plot(u_approx, title="Approx", mode="displacement")
+            # bottom two rots are ground truth
+            plt.subplot(4, args.n_plot // 2, 1 + args.n_plot + i)
+            fa.plot(ground_truth, title="Truth", mode="displacement")
+
 
     def vmap_validation_error(
         optimizer,
