@@ -28,6 +28,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=2, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=2, help="num eval tasks")
+parser.add_argument("--max_plot", type=int, default=6, help="num eval tasks to plot")
 parser.add_argument(
     "--lr_inner_lr", type=float, default=1e-2, help="lr for inner learning rate"
 )
@@ -243,6 +244,8 @@ if __name__ == "__main__":
     ):
         keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
         N = len(fenics_functions)
+        if N > args.max_plot:
+            N = args.max_plot
         assert N % 2 == 0
         for i in range(N):
             ground_truth = fenics_functions[i]
