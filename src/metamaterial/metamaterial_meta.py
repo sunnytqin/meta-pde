@@ -25,28 +25,28 @@ import argparse
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--bsize", type=int, default=2, help="batch size (in tasks)")
-parser.add_argument("--n_eval", type=int, default=2, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=1e-5, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=3e-5, help="outer learning rate")
+parser.add_argument("--bsize", type=int, default=32, help="batch size (in tasks)")
+parser.add_argument("--n_eval", type=int, default=32, help="num eval tasks")
+parser.add_argument("--inner_lr", type=float, default=1e-6, help="inner learning rate")
+parser.add_argument("--outer_lr", type=float, default=1e-5, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
-    default=32,
+    default=256,
     help="num query points on the boundary and in domain",
 )
 parser.add_argument(
     "--inner_points",
     type=int,
-    default=32,
+    default=256,
     help="num support points on the boundary and in domain",
 )
-parser.add_argument("--inner_steps", type=int, default=2, help="num inner steps")
-parser.add_argument("--outer_steps", type=int, default=int(1e4), help="num outer steps")
+parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
+parser.add_argument("--outer_steps", type=int, default=int(1e5), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
 parser.add_argument("--n_fourier", type=int, default=None, help="num fourier features")
-parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size")
-parser.add_argument("--siren", type=int, default=0, help="1 for true")
+parser.add_argument("--layer_size", type=int, default=128, help="fcnn layer size")
+parser.add_argument("--siren", type=int, default=1, help="1 for true")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")

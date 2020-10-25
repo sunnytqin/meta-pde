@@ -329,7 +329,7 @@ def sample_params(key, args):
         bc_params = np.zeros([2, 5], dtype=DTYPE)
     if args.vary_geometry:
         geo_params = jax.random.uniform(
-            k2, minval=-0.03, maxval=0.03, shape=(2,), dtype=DTYPE
+            k2, minval=np.array([-0.3, -0.1]), maxval=np.array([0., 0.1]), shape=(2,), dtype=DTYPE
         )
     else:
         geo_params = np.zeros(2, dtype=DTYPE)

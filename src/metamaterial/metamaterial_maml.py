@@ -96,6 +96,8 @@ if __name__ == "__main__":
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
 
+    log(args)
+
     def loss_fn(
         field_fn,
         points_on_boundary,
