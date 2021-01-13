@@ -2,6 +2,8 @@ import jax
 import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
+from flax import serialization
+
 
 from ..nets.field import NeuralField
 from ..nets import maml
@@ -21,6 +23,8 @@ import pdb
 
 import os
 import sys
+
+import pickle
 
 import argparse
 
@@ -178,14 +182,6 @@ if __name__ == "__main__":
         n_fourier=args.n_fourier,
     )
 
-    key, subkey = jax.random.split(jax.random.PRNGKey(0))
-
-    _, init_params = Field.init_by_shape(subkey, [((1, 2), DTYPE)])
-
-    optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(
-        flax.nn.Model(Field, init_params)
-    )
-
     def get_ground_truth_points(source_params_list, bc_params_list, geo_params_list):
         fenics_functions = []
         true_fields = []
@@ -301,6 +297,18 @@ if __name__ == "__main__":
 
         return np.sqrt(np.mean((fields - trunc_true_fields) ** 2))
 
+    def save_opt(optimizer):
+        state_bytes = serialization.to_bytes(optimizer)
+        with open(os.path.join(args.out_dir, args.expt_name + "most_recent_state"),
+                  'rb') as bytesfile:
+            pickle.dump(state_bytes, bytesfile)
+
+    def load_opt(optimizer):
+        with open(args.load_ckpt_file) as bytesfile:
+            state_bytes = pickle.load(bytesfile)
+            optimizer = serialization.from_bytes(optimizer, state_bytes)
+        return optimizer
+
     @jax.jit
     def validation_losses(model_and_lrs):
         _, losses, meta_losses = maml.multi_task_grad_and_losses(
@@ -309,6 +317,17 @@ if __name__ == "__main__":
         return losses, meta_losses
 
     assert args.n_eval % 2 == 0
+
+    key, subkey = jax.random.split(jax.random.PRNGKey(0))
+
+    _, init_params = Field.init_by_shape(subkey, [((1, 2), DTYPE)])
+
+    optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(
+        flax.nn.Model(Field, init_params)
+    )
+
+    if args.load_ckpt_file is not None:
+        optimizer = load_opt(optimizer)
 
     key, gt_key = jax.random.split(key, 2)
 
@@ -378,6 +397,7 @@ if __name__ == "__main__":
         )
 
         if args.viz_every > 0 and step % args.viz_every == 0:
+            save_opt(optimizer)
             plt.figure()
             compare_plots_with_ground_truth(
                 (optimizer.target, inner_lrs),
@@ -415,6 +435,9 @@ if __name__ == "__main__":
         ground_truth_bc,
         ground_truth_geo,
     )
+    save_opt(optimizer)
+
+
     if args.expt_name is not None:
         plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))
     else:
