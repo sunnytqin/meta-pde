@@ -212,7 +212,7 @@ if __name__ == "__main__":
         inner_in_domain = sample_points_in_domain(
             k1, args.inner_points, args.gridsize, geo_params
         )
-        inner_on_boundary = sample_points_on_boundary(k2, args.inner_points, geo_params)
+        inner_on_boundary = sample_points_on_boundary(k2, args.inner_points)
         inner_on_interior = sample_points_on_interior_boundary(
             k3, args.inner_points, geo_params
         )
