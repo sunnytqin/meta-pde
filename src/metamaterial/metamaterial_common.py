@@ -231,21 +231,25 @@ def interior_bc(geo_params, source_params, u, x):
     return np.sum(pk_dot_n ** 2)
 
 
-def sample_points_on_boundary(key, n, geo_params=None):
-    if geo_params is not None:
-        c1, c2 = geo_params
-    else:
-        c1, c2 = np.zeros(2, dtype=DTYPE)
-    theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
-    theta = theta + jax.random.uniform(
-        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
-    )
-    theta_in_pm_pidiv4 = np.mod((theta + np.pi / 4), np.pi / 2) - np.pi / 4
+def sample_points_on_boundary(key, n):
 
-    square_radius = 1.0 / np.cos(theta_in_pm_pidiv4)
+    s = np.linspace(0., 4., n, dtype=DTYPE)
+    s = s + jax.random.uniform(key, minval=0., maxval=(4./n), shape=(n,), dtype=DTYPE)
 
-    x = square_radius * np.cos(theta)
-    y = square_radius * np.sin(theta)
+    x = -np.ones(n, dtype=DTYPE)
+    y = -np.ones(n, dtype=DTYPE)
+
+    # First side
+    y = y + 2 * np.clip(s, 0., 1.)
+
+    # Second side
+    x = x + 2 * np.clip(s - 1., 0., 1.)
+
+    # Third side
+    y = y - 2 * np.clip(s - 2., 0., 1.)
+
+    # Fourth side
+    x = x - 2 * np.clip(s - 3., 0., 1.)
 
     return np.stack([x, y], axis=1)
 

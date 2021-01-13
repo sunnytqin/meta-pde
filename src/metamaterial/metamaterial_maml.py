@@ -76,6 +76,9 @@ parser.add_argument(
     default=1e-4,
     help="weight on interior boundary loss",
 )
+parser.add_argument(
+    "--n_cells", help="number cells on one side of ref volume", type=int, default=1
+)
 parser.add_argument("--out_dir", type=str, default="mm_meta_results")
 parser.add_argument("--expt_name", type=str, default=None)
 parser.add_argument("--load_ckpt_file", type=str, default=None)
@@ -301,11 +304,11 @@ if __name__ == "__main__":
     def save_opt(optimizer):
         state_bytes = serialization.to_bytes(optimizer)
         with open(os.path.join(args.out_dir, args.expt_name + "most_recent_state"),
-                  'rb') as bytesfile:
+                  'wb') as bytesfile:
             pickle.dump(state_bytes, bytesfile)
 
     def load_opt(optimizer):
-        with open(args.load_ckpt_file) as bytesfile:
+        with open(args.load_ckpt_file, 'r') as bytesfile:
             state_bytes = pickle.load(bytesfile)
             optimizer = serialization.from_bytes(optimizer, state_bytes)
         return optimizer
