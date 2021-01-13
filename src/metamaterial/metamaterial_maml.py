@@ -78,6 +78,7 @@ parser.add_argument(
 )
 parser.add_argument("--out_dir", type=str, default="mm_meta_results")
 parser.add_argument("--expt_name", type=str, default=None)
+parser.add_argument("--load_ckpt_file", type=str, default=None)
 parser.add_argument("--viz_every", type=int, default=10000, help="plot every N steps")
 
 
