@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import pdb
 import sys
 import os
+from copy import deepcopy
 
 import argparse
 
@@ -30,8 +31,8 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=3e-5, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=2e-4, help="outer learning rate")
+parser.add_argument("--inner_lr", type=float, default=1e-2, help="inner learning rate")
+parser.add_argument("--outer_lr", type=float, default=1e-2, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
@@ -44,20 +45,21 @@ parser.add_argument(
     default=512,
     help="num support points on the boundary and in domain",
 )
-parser.add_argument("--inner_steps", type=int, default=10, help="num inner steps")
-parser.add_argument("--outer_steps", type=int, default=int(1e6), help="num outer steps")
-parser.add_argument("--num_layers", type=int, default=5, help="num fcnn layers")
+parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
+parser.add_argument("--outer_steps", type=int, default=int(2e3), help="num outer steps")
+parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
 parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size")
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--siren", type=int, default=1, help="1=true.")
+parser.add_argument("--siren", type=int, default=0, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=1e1, help="weight on bc loss")
+parser.add_argument("--bc_scale", type=float, default=1e-1, help="scale on random uniform bc")
 parser.add_argument("--out_dir", type=str, default="poisson_meta_results")
-parser.add_argument("--expt_name", type=str, default=None)
+parser.add_argument("--expt_name", type=str, default='plot_for_prefpo')
 parser.add_argument(
-    "--viz_every", type=int, default=int(1e3), help="plot every N steps"
+    "--viz_every", type=int, default=int(0), help="plot every N steps"
 )
 
 
@@ -109,7 +111,8 @@ if __name__ == "__main__":
         )
         return inner_loss, outer_loss
 
-    make_inner_opt = flax.optim.Momentum(learning_rate=args.inner_lr, beta=0.0).create
+    make_inner_opt = flax.optim.Momentum(
+        learning_rate=args.inner_lr, beta=0.0).create
 
     maml_def = maml.MamlDef(
         make_inner_opt=make_inner_opt,
@@ -147,8 +150,10 @@ if __name__ == "__main__":
             )
         return fenics_functions, potentials, coords
 
-    @jax.jit
-    def make_potential_func(key, model, source_params, bc_params, geo_params, coords):
+    @partial(jax.jit, static_argnums=(6, 7))
+    def make_potential_func(key, model, source_params, bc_params, geo_params, coords,
+                            inner_steps,
+                            maml_def):
         # Input key is terminal
         k1, k2, k3 = jax.random.split(key, 3)
         inner_in_domain = sample_points_in_domain(k1, args.inner_points, geo_params)
@@ -156,7 +161,15 @@ if __name__ == "__main__":
         inner_loss_fn = lambda key, potential_fn: loss_fn(
             potential_fn, inner_on_boundary, inner_in_domain, source_params, bc_params
         )
-        final_model, _ = maml.single_task_rollout(maml_def, k3, model, inner_loss_fn)
+
+
+        final_model = jax.lax.cond(inner_steps!=0,
+                                   lambda _: maml.single_task_rollout(
+                                       maml_def, k3, model,
+                                       inner_loss_fn, inner_steps=inner_steps)[0],
+                                   lambda _: model,
+                                   0)
+
         return np.squeeze(final_model(coords))
 
     def compare_plots_with_ground_truth(
@@ -165,34 +178,40 @@ if __name__ == "__main__":
         keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
         N = len(fenics_functions)
         assert N % 2 == 0
-        for i in range(N):
+        for i in range(min([N, 5])):
             ground_truth = fenics_functions[i]
             # top two rows are optimizer.target
-            potentials = make_potential_func(
-                keys[i],
-                model,
-                sources[i],
-                bc_params[i],
-                geo_params[i],
-                ground_truth.function_space().tabulate_dof_coordinates(),
-            )
 
-            u_approx = fa.Function(ground_truth.function_space())
-            potentials.reshape(np.array(u_approx.vector()[:]).shape)
-            u_approx.vector().set_local(potentials)
+            #u_diff = fa.Function(ground_truth.function_space())
+            #u_diff.vector().set_local(potentials - np.array(ground_truth.vector()[:]))
 
-            u_diff = fa.Function(ground_truth.function_space())
-            u_diff.vector().set_local(potentials - np.array(ground_truth.vector()[:]))
+            plt.subplot(7, min([N, 5]), 1 + i)
+            plt.axis('off')
+            fa.plot(ground_truth)
+            if i==0:
+                plt.ylabel('Truth')
 
-            plt.subplot(3, N, 1 + i)
-
-            fa.plot(u_approx, title="Approx")
+            for j in range(6):
+                plt.subplot(7, min([N, 5]), 1 + min([N, 5])*(j+1) + i)
+                potentials = make_potential_func(
+                    keys[i],
+                    model,
+                    sources[i],
+                    bc_params[i],
+                    geo_params[i],
+                    ground_truth.function_space().tabulate_dof_coordinates(),
+                    j,
+                    maml_def
+                )
+                u_approx = fa.Function(ground_truth.function_space())
+                potentials.reshape(np.array(u_approx.vector()[:]).shape)
+                u_approx.vector().set_local(potentials)
+                fa.plot(u_approx)
+                plt.axis('off')
+                if i==0:
+                    plt.ylabel("Model: {} steps".format(j))
             # bottom two rots are ground truth
-            plt.subplot(3, N, 1 + i + N)
-            fa.plot(ground_truth, title="Truth")
-
-            plt.subplot(3, N, 1 + 2 * N + i)
-            fa.plot(u_diff, title="Difference", mode="displacement")
+            # pdb.set_trace()
 
     @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
     def vmap_validation_error(
@@ -205,19 +224,21 @@ if __name__ == "__main__":
     ):
         key = jax.random.PRNGKey(0)
         keys = jax.random.split(key, args.n_eval)
-        potentials = vmap(make_potential_func, (0, None, 0, 0, 0, 0))(
+        potentials = vmap(make_potential_func, (0, None, 0, 0, 0, 0, None, None))(
             keys,
             model,
             ground_truth_source,
             ground_truth_bc,
             ground_truth_geo,
             trunc_coords,
+            maml_def.inner_steps,
+            maml_def
         )
 
         return np.sqrt(np.mean((potentials - trunc_true_potentials) ** 2))
 
     @jax.jit
-    def validation_losses(model):
+    def validation_losses(model, maml_def=maml_def):
         _, losses, meta_losses = maml.multi_task_grad_and_losses(
             maml_def, jax.random.PRNGKey(0), model,
         )
@@ -308,6 +329,7 @@ if __name__ == "__main__":
 
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
+            # pdb.set_trace()
             compare_plots_with_ground_truth(
                 optimizer.target,
                 fenics_functions,

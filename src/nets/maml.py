@@ -60,7 +60,8 @@ def maml_inner_step(key, opt, inner_loss_fn, inner_lr):
 
 
 def single_task_rollout(
-    maml_def, rollout_key, initial_model, inner_loss_fn, inner_lrs=None
+    maml_def, rollout_key, initial_model, inner_loss_fn, inner_lrs=None,
+    inner_steps=-1
 ):
     """Roll out meta learned model on one task. Use for both training and deployment.
 
@@ -90,12 +91,20 @@ def single_task_rollout(
 
     inner_opt = maml_def.make_inner_opt(initial_model)
 
-    print(maml_def.inner_steps)
-    print(inner_lrs)
+    #print(maml_def.inner_steps)
+    #print(inner_lrs)
+
+    length = jax.lax.cond(inner_steps<0,
+                          lambda _: maml_def.inner_steps,
+                          lambda _: inner_steps,
+                          0)
+
+    inner_lrs = inner_lrs[:length]
 
     # Loop over the body_fn for each inner_step, carrying opt and stacking losses
+
     (final_opt, final_key), losses = jax.lax.scan(
-        body_fn, (inner_opt, rollout_key), inner_lrs, length=maml_def.inner_steps
+        body_fn, (inner_opt, rollout_key), inner_lrs
     )
 
     # Cat the final loss to loss array (to have losses before and after each grad step)

@@ -112,7 +112,7 @@ def solve_fenics(
     bc = fa.DirichletBC(V, bc_V, Boundary())
 
     F = (
-        fa.inner((1 + 1e-14 * u ** 2) * fa.grad(u), fa.grad(v)) * fa.dx
+        fa.inner((1 + 1e-1*u ** 2) * fa.grad(u), fa.grad(v)) * fa.dx
         + source_V * v * fa.dx
     )
     fa.solve(F == 0, u, bc)

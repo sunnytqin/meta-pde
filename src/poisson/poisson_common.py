@@ -34,8 +34,11 @@ def loss_fn(
         points_on_boundary, bc_params
     ) - potential_fn(points_on_boundary)
     loss_on_boundary = np.mean(err_on_boundary ** 2)
-    err_in_domain = vmap_laplace_operator(points_in_domain, potential_fn) - vmap_source(
-        points_in_domain, source_params
+
+    err_in_domain = (
+        vmap_laplace_operator(points_in_domain, potential_fn,# ) -
+                              lambda x: 1 + 0.1*potential_fn(x)**2) -
+        vmap_source(points_in_domain, source_params)
     )
     loss_in_domain = np.mean(err_in_domain ** 2)
     return loss_on_boundary, loss_in_domain
@@ -49,7 +52,8 @@ def sample_params(key, args):
     else:
         source_params = None
     if args.vary_bc:
-        bc_params = jax.random.normal(k2, shape=(5,), dtype=DTYPE)
+        bc_params = args.bc_scale * jax.random.uniform(k2, minval=-1., maxval=1.,
+                                                       shape=(5,), dtype=DTYPE)
     else:
         bc_params = None
     if args.vary_geometry:

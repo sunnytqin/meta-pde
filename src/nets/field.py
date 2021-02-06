@@ -23,11 +23,14 @@ def first_layer_siren_init(key, shape, dtype=np.float32):
     return jax.random.uniform(key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in)
 
 
-def vmap_laplace_operator(x, potential_fn):
-    return vmap(partial(laplace_operator, potential_fn))(x)
+def vmap_laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.):
+    to_vmap = lambda x, potential_fn=potential_fn, weighting_fn=weighting_fn: (
+        laplace_operator(x, potential_fn, weighting_fn)
+    )
+    return vmap(to_vmap)(x)
 
 
-def laplace_operator(potential_fn, x):
+def laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.):
     """
     Inputs:
         x: [2]
@@ -38,7 +41,10 @@ def laplace_operator(potential_fn, x):
     """
     assert len(x.shape) == 1
     dtype = x.dtype
-    hess_fn = jax.jacfwd(jax.jacrev(lambda x: potential_fn(x).squeeze()))
+    #hess_fn = jax.jacfwd(jax.jacrev(lambda x: potential_fn(x).squeeze()))
+    hess_fn = jax.jacfwd(
+        lambda x2: jax.jacrev(
+            lambda x1: potential_fn(x1).squeeze())(x2)*weighting_fn(x2))
     hess = hess_fn(x)
     assert len(hess.shape) == 2
     return np.trace(hess)
