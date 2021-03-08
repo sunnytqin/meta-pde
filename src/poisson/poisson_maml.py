@@ -149,6 +149,7 @@ if __name__ == "__main__":
         make_task_loss_fns=make_task_loss_fns,
         inner_steps=args.inner_steps,
         n_batch_tasks=args.bsize,
+        softplus_lrs=True
     )
 
     Potential = NeuralPotential.partial(
@@ -325,8 +326,7 @@ if __name__ == "__main__":
     for step in range(args.outer_steps):
         key, subkey = jax.random.split(key, 2)
 
-        logistic_inner_lrs = inner_lr_get(inner_lr_state)
-        inner_lrs, lr_vjp = jax.vjp(logaddexp, logistic_inner_lrs)
+        inner_lrs = inner_lr_get(inner_lr_state)
 
         with Timer() as t:
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
@@ -345,8 +345,7 @@ if __name__ == "__main__":
                         lambda x: x / meta_grad_norm, meta_grad
                     )
                 optimizer = optimizer.apply_gradient(meta_grad[0])
-                logistic_inner_lr_grad = lr_vjp(meta_grad[1])
-                inner_lr_state = inner_lr_update(step, logistic_inner_lr_grad,
+                inner_lr_state = inner_lr_update(step, meta_grad[1],
                                                  inner_lr_state)
             else:
                 log("NaN grad!")

@@ -32,11 +32,12 @@ MamlDef = namedtuple(
         #  and outer loss is the loss on query data)
         "inner_steps",  # int: num inner-loop optimization steps
         "n_batch_tasks",  # int: number of 'tasks' in a batch for a meta-train step
+        "softplus_lrs",  # bool: whether to force positive learned inner learning rate
     ],
 )
 
 
-def maml_inner_step(key, opt, inner_loss_fn, inner_lr):
+def maml_inner_step(key, opt, inner_loss_fn, inner_lr, softplus_lrs=False):
     """Inner step of MAML single-task rollout. It's just SGD or some other optim.
 
     Args:
@@ -57,15 +58,17 @@ def maml_inner_step(key, opt, inner_loss_fn, inner_lr):
 
     loss, grad = loss_and_grad_fn(key, opt.target)
 
+    maybe_softplus = lambda x: jax.nn.softplus(x) if softplus_lrs else x
+
     if jax.tree_util.tree_structure(grad) == jax.tree_util.tree_structure(inner_lr):
         grad = jax.tree_util.tree_multimap(
-            lambda g, lr: g*lr,
+            lambda g, lr: g*maybe_softplus(lr),
             grad,
             inner_lr
         )
     else:
         grad = jax.tree_util.tree_map(
-            lambda g: g*inner_lr,
+            lambda g: g*maybe_softplus(inner_lr),
             grad
         )
 
@@ -102,7 +105,7 @@ def single_task_rollout(
     def body_fn(carry, lr):
         opt, key = carry
         k1, k2 = jax.random.split(key)
-        opt, loss = maml_inner_step(k1, opt, inner_loss_fn, lr)
+        opt, loss = maml_inner_step(k1, opt, inner_loss_fn, lr, maml_def.softplus_lrs)
         return (opt, k2), loss
 
     inner_opt = maml_def.make_inner_opt(initial_model)
