@@ -401,13 +401,17 @@ if __name__ == "__main__":
             tflogger.log_scalar('meta_grad_norm', float(meta_grad_norm), step)
             tflogger.log_scalar('step_time', t.interval, step)
 
-            for k, v in dict_flatten(optimizer.target.params):
-                tflogger.log_histogram('Param: ' + k, v.flatten(), step)
+            if step % args.viz_every == 0:
+                # These take lots of filesize so only do them sometimes
 
-            for inner_step in range(args.inner_steps):
-                for k, v in dict_flatten(inner_lrs.params):
-                    tflogger.log_histogram('inner_lr_{}: '.format(inner_step) + k,
-                                           v[inner_step].flatten(), step)
+                for k, v in dict_flatten(optimizer.target.params):
+                    tflogger.log_histogram('Param: ' + k, v.flatten(), step)
+
+                for inner_step in range(args.inner_steps):
+                    for k, v in dict_flatten(inner_lrs.params):
+                        tflogger.log_histogram('inner_lr_{}: '.format(inner_step) + k,
+                                               jax.nn.sofplus(v[inner_step].flatten()),
+                                               step)
 
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
