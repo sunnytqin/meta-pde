@@ -4,6 +4,7 @@ import numpy as npo
 from jax import grad, jit, vmap
 from flax import serialization
 
+from jax.experimental import optimizers
 
 from ..nets.field import NeuralField
 from ..nets import maml
@@ -177,8 +178,6 @@ if __name__ == "__main__":
         n_batch_tasks=args.bsize,
     )
 
-    inner_lrs = np.ones(maml_def.inner_steps)
-
     Field = NeuralField.partial(
         sizes=[args.layer_size for _ in range(args.num_layers)],
         dense_args=(),
@@ -333,6 +332,15 @@ if __name__ == "__main__":
     if args.load_ckpt_file is not None:
         optimizer = load_opt(optimizer)
 
+    inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(
+        args.lr_inner_lr)
+
+    # Per lr per step lrs
+    inner_lr_state = inner_lr_init(
+        jax.tree_map(
+            lambda x: np.stack([np.ones_like(x) for _ in range(args.inner_steps)]),
+            optimizer.target))
+
     key, gt_key = jax.random.split(key, 2)
 
     gt_keys = jax.random.split(gt_key, args.n_eval)
@@ -354,6 +362,8 @@ if __name__ == "__main__":
     for step in range(args.outer_steps):
         key, subkey = jax.random.split(key, 2)
 
+        inner_lrs = inner_lr_get(inner_lr_state)
+
         with Timer() as t:
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
                 maml_def, subkey, optimizer.target, inner_lrs
@@ -371,7 +381,7 @@ if __name__ == "__main__":
                         lambda x: 10.0 * x / meta_grad_norm, meta_grad
                     )
                 optimizer = optimizer.apply_gradient(meta_grad[0])
-                inner_lrs = inner_lrs - args.lr_inner_lr * meta_grad[1]
+                inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
 
         val_error = vmap_validation_error(
             (optimizer.target, inner_lrs),

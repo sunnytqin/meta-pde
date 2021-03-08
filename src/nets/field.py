@@ -10,11 +10,12 @@ from flax import nn
 from functools import partial
 import pdb
 
+OMEGA0 = 10.
 
 def siren_init(key, shape, dtype=np.float32):
     fan_in = shape[0]
     return jax.random.uniform(
-        key, shape, dtype, -np.sqrt(6.0 / fan_in) / 30.0, np.sqrt(6.0 / fan_in) / 30.0
+        key, shape, dtype, -np.sqrt(6.0 / fan_in) / OMEGA0, np.sqrt(6.0 / fan_in) / OMEGA0
     )
 
 
@@ -100,16 +101,16 @@ def nf_apply(
             1.0, "fan_in", "truncated_normal"
         )  # flax.nn.initializers.lecun_normal()
         first_init = kernel_init
-    x = whiten(x, mean_x, std_x)
+    # x = whiten(x, mean_x, std_x)
     if n_fourier is not None:
         x = fourier_features(x, n_fourier)
     for i, size in enumerate(sizes):
         a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
         if nonlinearity == np.sin:
-            a = a * 30.0  # omega0 in siren
+            a = a * OMEGA0  # omega0 in siren
         x = nonlinearity(a)
     out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init)
-    return dewhiten(out, mean_y, std_y)
+    return out #dewhiten(out, mean_y, std_y)
 
 
 class NeuralField2d(nn.Module):

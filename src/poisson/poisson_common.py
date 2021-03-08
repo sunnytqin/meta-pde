@@ -47,21 +47,20 @@ def loss_fn(
 @partial(jax.jit, static_argnums=(1,))
 def sample_params(key, args):
     k1, k2, k3 = jax.random.split(key, 3)
-    if args.vary_source:
-        source_params = jax.random.normal(k1, shape=(2, 3,), dtype=DTYPE)
-    else:
-        source_params = None
-    if args.vary_bc:
-        bc_params = args.bc_scale * jax.random.uniform(k2, minval=-1., maxval=1.,
-                                                       shape=(5,), dtype=DTYPE)
-    else:
-        bc_params = None
-    if args.vary_geometry:
-        geo_params = jax.random.uniform(
-            k3, minval=-0.2, maxval=0.2, shape=(2,), dtype=DTYPE
-        )
-    else:
-        geo_params = np.zeros(2, dtype=DTYPE)
+
+    # These keys will all be 0 if we're not varying that factor
+    k1 = k1 * args.vary_source
+    k2 = k2 * args.vary_bc
+    k3 = k3 * args.vary_geometry
+
+    source_params = jax.random.normal(k1, shape=(2, 3,), dtype=DTYPE)
+
+    bc_params = args.bc_scale * jax.random.uniform(k2, minval=-1., maxval=1.,
+                                                   shape=(5,), dtype=DTYPE)
+
+    geo_params = jax.random.uniform(
+        k3, minval=-0.2, maxval=0.2, shape=(2,), dtype=DTYPE
+    )
 
     return source_params, bc_params, geo_params
 

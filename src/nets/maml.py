@@ -9,6 +9,7 @@ for other frameworks.
 
 from functools import partial
 from collections import namedtuple
+import pdb
 
 import jax
 import jax.numpy as np
@@ -51,10 +52,23 @@ def maml_inner_step(key, opt, inner_loss_fn, inner_lr):
 
     # differentiate w.r.t arg1 because args to inner loss are (key, model)
     loss_and_grad_fn = jax.value_and_grad(
-        lambda *args: inner_lr * inner_loss_fn(*args), argnums=1
+        lambda *args: inner_loss_fn(*args), argnums=1
     )
 
     loss, grad = loss_and_grad_fn(key, opt.target)
+
+    if jax.tree_util.tree_structure(grad) == jax.tree_util.tree_structure(inner_lr):
+        grad = jax.tree_util.tree_multimap(
+            lambda g, lr: g*lr,
+            grad,
+            inner_lr
+        )
+    else:
+        grad = jax.tree_util.tree_map(
+            lambda g: g*inner_lr,
+            grad
+        )
+
     new_opt = opt.apply_gradient(grad)
     return new_opt, loss
 
@@ -82,6 +96,8 @@ def single_task_rollout(
 
     if inner_lrs is None:
         inner_lrs = np.ones(maml_def.inner_steps)
+    else:
+        assert inner_steps == -1
 
     def body_fn(carry, lr):
         opt, key = carry
@@ -98,8 +114,6 @@ def single_task_rollout(
                           lambda _: maml_def.inner_steps,
                           lambda _: inner_steps,
                           0)
-
-    inner_lrs = inner_lrs[:length]
 
     # Loop over the body_fn for each inner_step, carrying opt and stacking losses
 
