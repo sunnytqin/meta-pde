@@ -61,7 +61,7 @@ class Logger(object):
 
         self.log_images(tag, images, step)
 
-    def log_histogram(self, tag, values, step, bins=1000):
+    def log_histogram(self, tag, values, step, bins=25):
         """Logs the histogram of a list/vector of values."""
         # Convert to a numpy array
         values = np.array(values)

@@ -410,7 +410,7 @@ if __name__ == "__main__":
                 for inner_step in range(args.inner_steps):
                     for k, v in dict_flatten(inner_lrs.params):
                         tflogger.log_histogram('inner_lr_{}: '.format(inner_step) + k,
-                                               jax.nn.sofplus(v[inner_step].flatten()),
+                                               jax.nn.softplus(v[inner_step].flatten()),
                                                step)
 
         if args.viz_every > 0 and step % args.viz_every == 0:
