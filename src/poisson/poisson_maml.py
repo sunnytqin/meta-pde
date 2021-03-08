@@ -29,6 +29,7 @@ import sys
 import os
 import shutil
 from copy import deepcopy
+from collections import namedtuple
 
 import argparse
 
@@ -37,7 +38,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
 parser.add_argument("--inner_lr", type=float, default=1e-3, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=1e-3, help="outer learning rate")
+parser.add_argument("--outer_lr", type=float, default=3e-4, help="outer learning rate")
 parser.add_argument(
     "--lr_inner_lr", type=float, default=1e-1, help="lr for inner learning rate"
 )
@@ -85,6 +86,8 @@ def dict_flatten(x, prefix=None):
 
 if __name__ == "__main__":
     args = parser.parse_args()
+    # make into a hashable, immutable namedtuple
+    args = namedtuple('ArgsTuple', vars(args))(**vars(args))
 
     if args.expt_name is not None:
         if not os.path.exists(args.out_dir):
@@ -252,7 +255,7 @@ if __name__ == "__main__":
             # bottom two rots are ground truth
             # pdb.set_trace()
 
-    @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
+    @jax.jit
     def vmap_validation_error(
         model_and_lrs,
         ground_truth_source,
@@ -298,8 +301,7 @@ if __name__ == "__main__":
 
     gt_keys = jax.random.split(gt_key, args.n_eval)
     ground_truth_source, ground_truth_bc, ground_truth_geo = vmap(
-        sample_params, (0, None)
-    )(gt_keys, args)
+        lambda key: sample_params(key, args))(gt_keys)
 
     print("gt_source: shape {}, val {}".format(ground_truth_source.shape,
                                                ground_truth_source))
@@ -323,7 +325,8 @@ if __name__ == "__main__":
     for step in range(args.outer_steps):
         key, subkey = jax.random.split(key, 2)
 
-        inner_lrs = inner_lr_get(inner_lr_state)
+        logistic_inner_lrs = inner_lr_get(inner_lr_state)
+        inner_lrs, lr_vjp = jax.vjp(logaddexp, logistic_inner_lrs)
 
         with Timer() as t:
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
@@ -342,7 +345,11 @@ if __name__ == "__main__":
                         lambda x: x / meta_grad_norm, meta_grad
                     )
                 optimizer = optimizer.apply_gradient(meta_grad[0])
-                inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
+                logistic_inner_lr_grad = lr_vjp(meta_grad[1])
+                inner_lr_state = inner_lr_update(step, logistic_inner_lr_grad,
+                                                 inner_lr_state)
+            else:
+                log("NaN grad!")
 
         val_error = vmap_validation_error(
             (optimizer.target, inner_lrs),
