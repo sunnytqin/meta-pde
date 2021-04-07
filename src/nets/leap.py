@@ -64,13 +64,13 @@ def leap_inner_step(leap_def, key, opt, loss_fn, meta_grad_accum):
     k1, k2 = jax.random.split(key, 2)
 
     # differentiate w.r.t arg1 because args to loss_fn are (key, model)
-    loss_and_grad_fn = jax.value_and_grad(loss_fn, argnums=1)
+    loss_and_grad_fn = jax.value_and_grad(loss_fn, argnums=1, has_aux=True)
 
-    loss, grad = loss_and_grad_fn(k1, opt.target)
+    (loss, aux), grad = loss_and_grad_fn(k1, opt.target)
     new_opt = opt.apply_gradient(grad)
 
     # inner optimization step done. now we update meta_grad_accum
-    new_loss = loss_fn(k2, new_opt.target)
+    (new_loss, new_aux) = loss_fn(k2, new_opt.target)
 
     meta_grad_increment = get_meta_grad_increment(
         leap_def, new_opt.target, opt.target, new_loss, loss, grad
@@ -79,7 +79,7 @@ def leap_inner_step(leap_def, key, opt, loss_fn, meta_grad_accum):
     meta_grad_accum = jax.tree_util.tree_multimap(
         lambda x, y: x + y, meta_grad_accum, meta_grad_increment
     )
-    return new_opt, meta_grad_accum, new_loss
+    return new_opt, meta_grad_accum, (new_loss, new_aux)
 
 
 def single_task_rollout(leap_def, key, initial_model, loss_fn):
@@ -120,7 +120,9 @@ def single_task_rollout(leap_def, key, initial_model, loss_fn):
         body_fn, (inner_opt, meta_grad_accum), inner_keys, length=leap_def.inner_steps
     )
 
-    losses = np.concatenate((np.array([loss0]), losses))
+    losses = jax.tree_util.tree_multimap(
+        lambda x, y: np.append(x[::-1], y)[::-1], losses, loss0
+    )
 
     return final_opt.target, meta_grad_accum, losses
 
@@ -146,7 +148,7 @@ def single_task_grad_and_losses(leap_def, key, initial_model):
 
 
 @partial(jax.jit, static_argnums=0)
-def multitask_rollout(leap_def, key, initial_model):
+def multi_task_grad_and_losses(leap_def, key, initial_model):
     """Roll out meta learner across multiple tasks, collecting Leap gradients.
 
     Args:
@@ -232,7 +234,10 @@ def run_sinusoid():
         x = jax.random.uniform(key, shape=(32, 1))
         y = np.sin(x + phase)
         yhat = model(x)
-        return np.mean((y - yhat) ** 2)
+        return (
+            np.mean((y - yhat) ** 2),
+            {"mean_phase": np.mean(phase), "mean_yhat": np.mean(yhat)},
+        )
 
     # Fn which makes a loss fn for a task (by sampling a phase)
     def make_task_loss_fn(key):
@@ -257,12 +262,14 @@ def run_sinusoid():
     key = jax.random.PRNGKey(1)
     for i in range(1000):
         key, subkey = jax.random.split(key)
-        grad, losses = multitask_rollout(leap_def, subkey, meta_opt.target)
+        grad, losses = multi_task_grad_and_losses(leap_def, subkey, meta_opt.target)
         print(
             "meta-step {}, per-inner-step avg losses {}".format(
-                i, np.mean(losses, axis=0)
+                i, np.mean(losses[0], axis=0)
             )
         )
+        for k in losses[1]:
+            print(k + " per-inner-step: {}".format(np.mean(losses[1][k], axis=0)))
         meta_opt = meta_opt.apply_gradient(grad)
 
 

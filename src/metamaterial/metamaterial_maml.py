@@ -302,12 +302,13 @@ if __name__ == "__main__":
 
     def save_opt(optimizer):
         state_bytes = serialization.to_bytes(optimizer)
-        with open(os.path.join(args.out_dir, args.expt_name + "most_recent_state"),
-                  'wb') as bytesfile:
+        with open(
+            os.path.join(args.out_dir, args.expt_name + "most_recent_state"), "wb"
+        ) as bytesfile:
             pickle.dump(state_bytes, bytesfile)
 
     def load_opt(optimizer):
-        with open(args.load_ckpt_file, 'r') as bytesfile:
+        with open(args.load_ckpt_file, "r") as bytesfile:
             state_bytes = pickle.load(bytesfile)
             optimizer = serialization.from_bytes(optimizer, state_bytes)
         return optimizer
@@ -332,14 +333,15 @@ if __name__ == "__main__":
     if args.load_ckpt_file is not None:
         optimizer = load_opt(optimizer)
 
-    inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(
-        args.lr_inner_lr)
+    inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(args.lr_inner_lr)
 
     # Per lr per step lrs
     inner_lr_state = inner_lr_init(
         jax.tree_map(
             lambda x: np.stack([np.ones_like(x) for _ in range(args.inner_steps)]),
-            optimizer.target))
+            optimizer.target,
+        )
+    )
 
     key, gt_key = jax.random.split(key, 2)
 
@@ -450,7 +452,6 @@ if __name__ == "__main__":
         ground_truth_geo,
     )
     save_opt(optimizer)
-
 
     if args.expt_name is not None:
         plt.savefig(os.path.join(args.out_dir, args.expt_name + "_viz_final.png"))

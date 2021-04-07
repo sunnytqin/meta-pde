@@ -233,23 +233,25 @@ def interior_bc(geo_params, source_params, u, x):
 
 def sample_points_on_boundary(key, n):
 
-    s = np.linspace(0., 4., n, dtype=DTYPE)
-    s = s + jax.random.uniform(key, minval=0., maxval=(4./n), shape=(n,), dtype=DTYPE)
+    s = np.linspace(0.0, 4.0, n, dtype=DTYPE)
+    s = s + jax.random.uniform(
+        key, minval=0.0, maxval=(4.0 / n), shape=(n,), dtype=DTYPE
+    )
 
     x = -np.ones(n, dtype=DTYPE)
     y = -np.ones(n, dtype=DTYPE)
 
     # First side
-    y = y + 2 * np.clip(s, 0., 1.)
+    y = y + 2 * np.clip(s, 0.0, 1.0)
 
     # Second side
-    x = x + 2 * np.clip(s - 1., 0., 1.)
+    x = x + 2 * np.clip(s - 1.0, 0.0, 1.0)
 
     # Third side
-    y = y - 2 * np.clip(s - 2., 0., 1.)
+    y = y - 2 * np.clip(s - 2.0, 0.0, 1.0)
 
     # Fourth side
-    x = x - 2 * np.clip(s - 3., 0., 1.)
+    x = x - 2 * np.clip(s - 3.0, 0.0, 1.0)
 
     return np.stack([x, y], axis=1)
 
@@ -333,7 +335,11 @@ def sample_params(key, args):
         bc_params = np.zeros([2, 5], dtype=DTYPE)
     if args.vary_geometry:
         geo_params = jax.random.uniform(
-            k2, minval=np.array([-0.3, -0.1]), maxval=np.array([0., 0.1]), shape=(2,), dtype=DTYPE
+            k2,
+            minval=np.array([-0.3, -0.1]),
+            maxval=np.array([0.0, 0.1]),
+            shape=(2,),
+            dtype=DTYPE,
         )
     else:
         geo_params = np.zeros(2, dtype=DTYPE)

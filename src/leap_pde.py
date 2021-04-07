@@ -69,6 +69,12 @@ parser.add_argument("--pde", type=str, default="nonlinear_stokes", help="which P
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="leap_default")
 parser.add_argument("--viz_every", type=int, default=1000, help="plot every N steps")
+parser.add_argument(
+    "--fixed_num_pdes",
+    type=int,
+    default=None,
+    help="set to e.g. 1 to force just 1 possible pde param",
+)
 
 
 if __name__ == "__main__":
@@ -195,7 +201,7 @@ if __name__ == "__main__":
             leap_def,
         )
 
-        return np.sqrt(np.mean((coefs - ground_truth_vals) ** 2))
+        return np.sqrt(np.mean((coefs - ground_truth_vals.reshape(coefs.shape)) ** 2))
 
     @jax.jit
     def validation_losses(model, leap_def=leap_def):

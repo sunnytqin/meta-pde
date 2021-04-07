@@ -125,6 +125,10 @@ def loss_fn(field_fn, points, params):
 
 @partial(jax.jit, static_argnums=(1,))
 def sample_params(key, args):
+
+    if args.fixed_num_pdes is not None:
+        key = jax.random.PRNGKey(jax.random.randint(key, (), 0, args.fixed_num_pdes))
+
     k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
 
     # These keys will all be 0 if we're not varying that factor

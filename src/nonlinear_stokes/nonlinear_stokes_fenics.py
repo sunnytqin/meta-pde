@@ -1,7 +1,7 @@
 """
-    Solve the stationary viscous Burgers' equation using FEniCS
-    -mu*u"+(u*u_x)=0
-     u(-1)=1, u(+1)=1
+    Solve the nonlinear Stokes equation using fenics
+
+    PDE: https://www.osti.gov/servlets/purl/1090851, section 2.3
 """
 
 import fenics as fa

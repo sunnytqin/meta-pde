@@ -78,6 +78,12 @@ parser.add_argument("--pde", type=str, default="poisson", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="highlr_plot_for_prefpo")
 parser.add_argument("--viz_every", type=int, default=1000, help="plot every N steps")
+parser.add_argument(
+    "--fixed_num_pdes",
+    type=int,
+    default=None,
+    help="set to e.g. 1 to force just 1 possible pde param",
+)
 
 
 def dict_flatten(x, prefix=None):
@@ -229,7 +235,7 @@ if __name__ == "__main__":
             maml_def,
         )
 
-        return np.sqrt(np.mean((coefs - ground_truth_vals) ** 2))
+        return np.sqrt(np.mean((coefs - ground_truth_vals.reshape(coefs.shape)) ** 2))
 
     @jax.jit
     def validation_losses(model_and_lrs, maml_def=maml_def):

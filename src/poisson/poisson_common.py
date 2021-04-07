@@ -8,6 +8,8 @@ from functools import partial
 import flax
 from flax import nn
 
+import fenics as fa
+
 import matplotlib.pyplot as plt
 import pdb
 
@@ -15,37 +17,32 @@ import pdb
 DTYPE = np.float32
 
 
-def plot(model, grid, source_params, bc_params, geo_params=(0.0, 0.0)):
-    c1, c2 = geo_params
-    potentials = model(grid)
-    potentials = npo.array(potentials)
-    thetas = np.arctan2(grid[:, 1], grid[:, 0])
-    r0s = 1.0 + c1 * np.cos(4 * thetas) + c2 * np.cos(8 * thetas)
-    potentials[npo.linalg.norm(grid, axis=1) > r0s] = 0.0
-    potentials = potentials.reshape(101, 101)
-    plt.imshow(potentials)
-    plt.colorbar()
+def plot_solution(u, params):
+    fa.plot(u)
 
 
-def loss_fn(
-    points_on_boundary, points_in_domain, potential_fn, source_params, bc_params
-):
+def loss_fn(potential_fn, points, params):
+    points_on_boundary, points_in_domain = points
+    source_params, bc_params, _ = params
+
     err_on_boundary = vmap_boundary_conditions(
         points_on_boundary, bc_params
     ) - potential_fn(points_on_boundary)
     loss_on_boundary = np.mean(err_on_boundary ** 2)
 
-    err_in_domain = (
-        vmap_laplace_operator(points_in_domain, potential_fn,# ) -
-                              lambda x: 1 + 0.1*potential_fn(x)**2) -
-        vmap_source(points_in_domain, source_params)
-    )
+    err_in_domain = vmap_laplace_operator(
+        points_in_domain, potential_fn, lambda x: 1 + 0.1 * potential_fn(x) ** 2  # ) -
+    ) - vmap_source(points_in_domain, source_params)
     loss_in_domain = np.mean(err_in_domain ** 2)
-    return loss_on_boundary, loss_in_domain
+    return {"boundary_loss": loss_on_boundary}, {"domain_loss": loss_in_domain}
 
 
 @partial(jax.jit, static_argnums=(1,))
 def sample_params(key, args):
+
+    if args.fixed_num_pdes is not None:
+        key = jax.random.PRNGKey(jax.random.randint(key, (), 0, args.fixed_num_pdes))
+
     k1, k2, k3 = jax.random.split(key, 3)
 
     # These keys will all be 0 if we're not varying that factor
@@ -55,8 +52,9 @@ def sample_params(key, args):
 
     source_params = jax.random.normal(k1, shape=(2, 3,), dtype=DTYPE)
 
-    bc_params = args.bc_scale * jax.random.uniform(k2, minval=-1., maxval=1.,
-                                                   shape=(5,), dtype=DTYPE)
+    bc_params = args.bc_scale * jax.random.uniform(
+        k2, minval=-1.0, maxval=1.0, shape=(5,), dtype=DTYPE
+    )
 
     geo_params = jax.random.uniform(
         k3, minval=-0.2, maxval=0.2, shape=(2,), dtype=DTYPE
@@ -65,8 +63,16 @@ def sample_params(key, args):
     return source_params, bc_params, geo_params
 
 
+def sample_points(key, n, params):
+    k1, k2 = jax.random.split(key)
+    points_on_boundary = sample_points_on_boundary(k1, n, params)
+    points_in_domain = sample_points_on_boundary(k2, n, params)
+    return (points_on_boundary, points_in_domain)
+
+
 @partial(jax.jit, static_argnums=(1,))
-def sample_points_on_boundary(key, n, geo_params):
+def sample_points_on_boundary(key, n, params):
+    _, _, geo_params = params
     c1, c2 = geo_params
     theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
     theta = theta + jax.random.uniform(
@@ -79,7 +85,8 @@ def sample_points_on_boundary(key, n, geo_params):
 
 
 @partial(jax.jit, static_argnums=(1,))
-def sample_points_in_domain(key, n, geo_params):
+def sample_points_in_domain(key, n, params):
+    _, _, geo_params = params
     c1, c2 = geo_params
     key1, key2, key3 = jax.random.split(key, 3)
     theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)

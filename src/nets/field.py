@@ -10,12 +10,17 @@ from flax import nn
 from functools import partial
 import pdb
 
-OMEGA0 = 10.
+OMEGA0 = 10.0
+
 
 def siren_init(key, shape, dtype=np.float32):
     fan_in = shape[0]
     return jax.random.uniform(
-        key, shape, dtype, -np.sqrt(6.0 / fan_in) / OMEGA0, np.sqrt(6.0 / fan_in) / OMEGA0
+        key,
+        shape,
+        dtype,
+        -np.sqrt(6.0 / fan_in) / OMEGA0,
+        np.sqrt(6.0 / fan_in) / OMEGA0,
     )
 
 
@@ -24,14 +29,14 @@ def first_layer_siren_init(key, shape, dtype=np.float32):
     return jax.random.uniform(key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in)
 
 
-def vmap_laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.):
+def vmap_laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.0):
     to_vmap = lambda x, potential_fn=potential_fn, weighting_fn=weighting_fn: (
         laplace_operator(x, potential_fn, weighting_fn)
     )
     return vmap(to_vmap)(x)
 
 
-def laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.):
+def laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.0):
     """
     Inputs:
         x: [2]
@@ -42,13 +47,50 @@ def laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.):
     """
     assert len(x.shape) == 1
     dtype = x.dtype
-    #hess_fn = jax.jacfwd(jax.jacrev(lambda x: potential_fn(x).squeeze()))
+    # hess_fn = jax.jacfwd(jax.jacrev(lambda x: potential_fn(x).squeeze()))
     hess_fn = jax.jacfwd(
-        lambda x2: jax.jacrev(
-            lambda x1: potential_fn(x1).squeeze())(x2)*weighting_fn(x2))
+        lambda x2: jax.jacrev(lambda x1: potential_fn(x1).squeeze())(x2)
+        * weighting_fn(x2)
+    )
     hess = hess_fn(x)
     assert len(hess.shape) == 2
     return np.trace(hess)
+
+
+def vmap_divergence(x, field_fn):
+    to_vmap = lambda x, field_fn=field_fn: (divergence(x, field_fn))
+    return vmap(to_vmap)(x)
+
+
+def divergence(x, field_fn):
+    """
+    Inputs:
+        x: [2]
+        potential_fn: fn which takes x and returns the potential phi
+
+    returns:
+        divergence of u(x,y)
+    """
+    assert len(x.shape) == 1
+    dtype = x.dtype
+    # hess_fn = jax.jacfwd(jax.jacrev(lambda x: potential_fn(x).squeeze()))
+    jac = jax.jacfwd(lambda x: field_fn(x).squeeze())(x)
+    assert len(jac.shape) == 2
+    return np.trace(jac)
+
+
+def divergence_tensor(x, tensor_fn):
+    assert len(x.shape) == 1
+    jac = jax.jacfwd(lambda x: tensor_fn(x).squeeze())(x)
+    assert len(jac.shape) == 3
+    assert jac.shape[0] == jac.shape[1]
+    assert jac.shape[1] == jac.shape[2]
+    return np.trace(jac, axis1=1, axis2=2)
+
+
+def vmap_divergence_tensor(x, tensor_fn):
+    to_vmap = lambda x, tensor_fn=tensor_fn: (divergence_tensor(x, tensor_fn))
+    return vmap(to_vmap)(x)
 
 
 def fourier_features(x, n_features):
@@ -110,7 +152,7 @@ def nf_apply(
             a = a * OMEGA0  # omega0 in siren
         x = nonlinearity(a)
     out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init)
-    return out #dewhiten(out, mean_y, std_y)
+    return out  # dewhiten(out, mean_y, std_y)
 
 
 class NeuralField2d(nn.Module):
@@ -168,6 +210,36 @@ class NeuralField1d(nn.Module):
             std_y,
             n_fourier,
         ).sum(axis=-1)
+
+
+def make_nf_ndim(n_dims):
+    class HigherDimNeuralField(nn.Module):
+        def apply(
+            self,
+            x,
+            sizes,
+            dense_args=(),
+            nonlinearity=nn.relu,
+            mean_x=None,
+            std_x=None,
+            mean_y=None,
+            std_y=None,
+            n_fourier=None,
+        ):
+            return nf_apply(
+                n_dims,
+                x,
+                sizes,
+                dense_args,
+                nonlinearity,
+                mean_x,
+                std_x,
+                mean_y,
+                std_y,
+                n_fourier,
+            )
+
+    return HigherDimNeuralField
 
 
 NeuralPotential = NeuralField1d

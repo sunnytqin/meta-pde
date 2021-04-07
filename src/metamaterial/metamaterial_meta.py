@@ -275,7 +275,6 @@ if __name__ == "__main__":
             plt.subplot(4, args.n_plot // 2, 1 + args.n_plot + i)
             fa.plot(ground_truth, title="Truth", mode="displacement")
 
-
     def vmap_validation_error(
         optimizer,
         ground_truth_source,

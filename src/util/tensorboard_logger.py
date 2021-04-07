@@ -52,7 +52,7 @@ class Logger(object):
             # Write the image to a string
             s = BytesIO()
             plt.figure(fig.number)
-            plt.savefig(s, format="png")
+            plt.savefig(s, format="png", dpi=800)
             # width, height = fig.get_size_inches() * fig.get_dpi()
             # width = int(width)
             # height = int(height)
