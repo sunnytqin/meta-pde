@@ -64,7 +64,8 @@ def extract_coefs_by_dim(function_space, dofs, out, dim_idx=0):
     dofs = dofs.reshape(dofs.shape[0], -1)  # If DoFs is 1d, make it 2d
     if function_space.num_sub_spaces() > 0:
         for sidx in range(function_space.num_sub_spaces()):
-            dim_idx = extract_coefs_by_dim(function_space.sub(sidx), dofs, out, dim_idx)
+            dim_idx = extract_coefs_by_dim(
+                function_space.sub(sidx), dofs, out, dim_idx)
     else:
         if dim_idx >= dofs.shape[1]:
             raise Exception("Mismatch between Fenics fn space dim and dofs arr")
