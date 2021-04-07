@@ -7,3 +7,8 @@ requirements
 - fenics
 - tensorboard/tensorflow
 - numpy, scipy, matplotlib
+
+relevant papers:
+- maml https://arxiv.org/abs/1703.03400
+- leap https://arxiv.org/abs/1812.01054
+- physics informed NNs (many papers)
