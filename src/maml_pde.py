@@ -369,8 +369,12 @@ if __name__ == "__main__":
             plt.figure()
             # pdb.set_trace()
             trainer_util.compare_plots_with_ground_truth(
-                (optimizer.target, inner_lrs), pde, fenics_functions,
-                gt_params, get_final_model, maml_def
+                (optimizer.target, inner_lrs),
+                pde,
+                fenics_functions,
+                gt_params,
+                get_final_model,
+                maml_def,
             )
 
             if tflogger is not None:
