@@ -31,7 +31,7 @@ def dict_flatten(x, prefix=None):
     return [(prefix, x)]
 
 
-def get_ground_truth_points(pde, pde_params_list, key):
+def get_ground_truth_points(args, pde, pde_params_list, key):
     """Given a pdedef and list of pde parameters, sample points in the domain and
     evaluate the ground truth at those points."""
     fenics_functions = []

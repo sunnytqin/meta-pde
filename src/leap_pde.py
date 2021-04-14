@@ -229,7 +229,7 @@ if __name__ == "__main__":
     print("gt_params: {}".format(gt_params))
 
     fenics_functions, fenics_vals, coords = get_ground_truth_points(
-        pde, jax_tools.tree_unstack(gt_params), gt_points_key
+        args, pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
     # --------------------- Run LEAP --------------------
