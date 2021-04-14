@@ -34,6 +34,8 @@ from collections import namedtuple
 
 import argparse
 
+from .trainer_util import *
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
