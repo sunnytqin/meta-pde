@@ -1,6 +1,26 @@
 import jax
 
 
+def dict_flatten(x, prefix=None):
+    """Given hierarchy of dicts, flatten them out into one dict.
+
+    E.g.
+    {'Layer1': {'Weight': W, 'Bias': b}}
+    ->
+    {'Layer1_Weight': W, 'Layer1_Bias': b}
+
+    Useful for getting a list of params in a Flax model (e.g. for visualization)
+    """
+    if isinstance(x, dict):
+        out = []
+        for key in x.keys():
+            out = out + dict_flatten(
+                x[key], str(key) if prefix is None else prefix + "_" + str(key)
+            )
+        return out
+    return [(prefix, x)]
+
+
 def tree_unstack(x):
     """Unstacks a pytree x to a list of xi.
 

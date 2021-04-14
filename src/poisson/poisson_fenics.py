@@ -1,7 +1,9 @@
 """
     Solve a nonlinear Poisson equation using Fenics,
 
-    (1 + 0.1 u(x) **2 ) laplacian(u(x)) = f(x)
+    nabla dot ((1 + 0.1 u**2) nabla u) = f(x)
+
+    per https://fenicsproject.org/olddocs/dolfin/1.4.0/python/demo/documented/nonlinear-poisson/python/documentation.html
 
     where u is the potential we are solving for, f is a source term,
     and the laplacian is the trace of the hessian (d^2 u / dx^2).

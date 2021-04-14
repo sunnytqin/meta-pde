@@ -24,6 +24,8 @@ from .util.timer import Timer
 
 from .util import jax_tools
 
+from .util import trainer_util
+
 import matplotlib.pyplot as plt
 import pdb
 import sys
@@ -33,8 +35,6 @@ from copy import deepcopy
 from collections import namedtuple
 
 import argparse
-
-from .trainer_util import *
 
 
 parser = argparse.ArgumentParser()
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     gt_params = vmap(pde.sample_params, (0, None))(gt_keys, args)
     print("gt_params: {}".format(gt_params))
 
-    fenics_functions, fenics_vals, coords = get_ground_truth_points(
+    fenics_functions, fenics_vals, coords = trainer_util.get_ground_truth_points(
         args, pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
@@ -330,13 +330,13 @@ if __name__ == "__main__":
             if step % args.viz_every == 0:
                 # These take lots of filesize so only do them sometimes
 
-                for k, v in dict_flatten(optimizer.target.params):
+                for k, v in jax_tools.dict_flatten(optimizer.target.params):
                     tflogger.log_histogram("Param: " + k, v.flatten(), step)
 
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
             # pdb.set_trace()
-            compare_plots_with_ground_truth(
+            trainer_util.compare_plots_with_ground_truth(
                 optimizer.target,
                 pde,
                 fenics_functions,

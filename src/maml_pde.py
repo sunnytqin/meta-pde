@@ -24,6 +24,8 @@ from .util.timer import Timer
 
 from .util import jax_tools
 
+from .util import trainer_util
+
 import matplotlib.pyplot as plt
 import pdb
 import sys
@@ -33,8 +35,6 @@ from copy import deepcopy
 from collections import namedtuple
 
 import argparse
-
-from .trainer_util import *
 
 
 parser = argparse.ArgumentParser()
@@ -72,7 +72,7 @@ parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument("--siren", type=int, default=0, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
-parser.add_argument("--bc_weight", type=float, default=1.0, help="weight on bc loss")
+parser.add_argument("--bc_weight", type=float, default=10.0, help="weight on bc loss")
 parser.add_argument(
     "--bc_scale", type=float, default=2e-1, help="scale on random uniform bc"
 )
@@ -86,17 +86,6 @@ parser.add_argument(
     default=None,
     help="set to e.g. 1 to force just 1 possible pde param",
 )
-
-
-def dict_flatten(x, prefix=None):
-    if isinstance(x, dict):
-        out = []
-        for key in x.keys():
-            out = out + dict_flatten(
-                x[key], str(key) if prefix is None else prefix + "_" + str(key)
-            )
-        return out
-    return [(prefix, x)]
 
 
 if __name__ == "__main__":
@@ -263,7 +252,7 @@ if __name__ == "__main__":
     gt_params = vmap(pde.sample_params, (0, None))(gt_keys, args)
     print("gt_params: {}".format(gt_params))
 
-    fenics_functions, fenics_vals, coords = get_ground_truth_points(
+    fenics_functions, fenics_vals, coords = trainer_util.get_ground_truth_points(
         args, pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
@@ -366,22 +355,22 @@ if __name__ == "__main__":
             if step % args.viz_every == 0:
                 # These take lots of filesize so only do them sometimes
 
-                for k, v in dict_flatten(optimizer.target.params):
+                for k, v in jax_tools.dict_flatten(optimizer.target.params):
                     tflogger.log_histogram("Param: " + k, v.flatten(), step)
 
                 for inner_step in range(args.inner_steps):
-                    for k, v in dict_flatten(inner_lrs.params):
+                    for k, v in jax_tools.dict_flatten(inner_lrs.params):
                         tflogger.log_histogram(
                             "inner_lr_{}: ".format(inner_step) + k,
                             jax.nn.softplus(v[inner_step].flatten()),
                             step,
                         )
-
         if args.viz_every > 0 and step % args.viz_every == 0:
             plt.figure()
             # pdb.set_trace()
-            compare_plots_with_ground_truth(
-                (optimizer.target, inner_lrs), fenics_functions, gt_params,
+            trainer_util.compare_plots_with_ground_truth(
+                (optimizer.target, inner_lrs), pde, fenics_functions,
+                gt_params, get_final_model, maml_def
             )
 
             if tflogger is not None:
