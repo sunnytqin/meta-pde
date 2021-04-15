@@ -52,7 +52,7 @@ parser.add_argument(
 parser.add_argument(
     "--validation_points",
     type=int,
-    default=2048,
+    default=1024,
     help="num points in domain for validation",
 )
 parser.add_argument("--inner_steps", type=int, default=10, help="num inner steps")
@@ -174,9 +174,11 @@ if __name__ == "__main__":
         inner_points = pde.sample_points(k1, args.inner_points, params)
         inner_loss_fn = lambda key, field_fn: loss_fn(field_fn, inner_points, params)
 
+        temp_leap_def = leap_def._replace(inner_steps=inner_steps)
         final_model = jax.lax.cond(
             inner_steps != 0,
-            lambda _: leap.single_task_rollout(leap_def, k2, model, inner_loss_fn)[0],
+            lambda _: leap.single_task_rollout(temp_leap_def, k2, model,
+                                               inner_loss_fn)[0],
             lambda _: model,
             0,
         )
@@ -336,6 +338,7 @@ if __name__ == "__main__":
                 gt_params,
                 get_final_model,
                 leap_def,
+                args.inner_steps,
             )
 
             if tflogger is not None:
@@ -351,7 +354,8 @@ if __name__ == "__main__":
 
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
-        optimizer.target, pde, fenics_functions, gt_params, get_final_model, leap_def
+        optimizer.target, pde, fenics_functions, gt_params, get_final_model, leap_def,
+        args.inner_steps,
     )
     if args.expt_name is not None:
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)

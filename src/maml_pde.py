@@ -196,10 +196,12 @@ if __name__ == "__main__":
 
         inner_lrs = jax.tree_map(lambda x: x[:inner_steps], inner_lrs)
 
+        temp_maml_def = maml_def._replace(inner_steps=inner_steps)
+
         final_model = jax.lax.cond(
             inner_steps != 0,
             lambda _: maml.single_task_rollout(
-                maml_def, k2, model, inner_loss_fn, inner_lrs
+                temp_maml_def, k2, model, inner_loss_fn, inner_lrs
             )[0],
             lambda _: model,
             0,
@@ -369,6 +371,7 @@ if __name__ == "__main__":
                 gt_params,
                 get_final_model,
                 maml_def,
+                args.inner_steps,
             )
 
             if tflogger is not None:
@@ -390,6 +393,7 @@ if __name__ == "__main__":
         gt_params,
         get_final_model,
         maml_def,
+        args.inner_steps,
     )
     if args.expt_name is not None:
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)

@@ -260,6 +260,7 @@ if __name__ == "__main__":
                 gt_params,
                 get_final_model,
                 None,
+                0,
             )
 
             if tflogger is not None:
@@ -276,6 +277,7 @@ if __name__ == "__main__":
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
         optimizer.target, pde, fenics_functions, gt_params, get_final_model, None,
+        0,
     )
     if args.expt_name is not None:
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)

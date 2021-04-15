@@ -60,7 +60,8 @@ def extract_coefs_by_dim(function_space, dofs, out, dim_idx=0):
 
 
 def compare_plots_with_ground_truth(
-    model, pde, fenics_functions, params_stacked, get_final_model, meta_alg_def
+    model, pde, fenics_functions, params_stacked,
+    get_final_model, meta_alg_def, inner_steps
 ):
     """Plot the solutions corresponding to ground truth, and corresponding to the
     meta-learned model after each of k gradient steps.
@@ -75,15 +76,15 @@ def compare_plots_with_ground_truth(
     for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
         ground_truth = fenics_functions[i]
 
-        plt.subplot(7, min([N, 8]), 1 + i)
+        plt.subplot(inner_steps+2, min([N, 8]), 1 + i)
         plt.axis("off")
         ground_truth.set_allow_extrapolation(False)
         pde.plot_solution(ground_truth, params_list[i])
         if i == 0:
             plt.ylabel("Truth")
 
-        for j in range(6):
-            plt.subplot(7, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
+        for j in range(inner_steps+1):
+            plt.subplot(inner_steps+2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
             final_model = get_final_model(
                 keys[i], model, params_list[i], j, meta_alg_def,
             )
