@@ -80,7 +80,7 @@ parser.add_argument(
 )
 parser.add_argument("--pde", type=str, default="poisson", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
-parser.add_argument("--expt_name", type=str, default="highlr_plot_for_prefpo")
+parser.add_argument("--expt_name", type=str, default="maml_default")
 parser.add_argument("--viz_every", type=int, default=1000, help="plot every N steps")
 parser.add_argument(
     "--fixed_num_pdes",

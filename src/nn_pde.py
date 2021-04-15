@@ -68,8 +68,8 @@ parser.add_argument(
 )
 parser.add_argument("--pde", type=str, default="poisson", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
-parser.add_argument("--expt_name", type=str, default="highlr_plot_for_prefpo")
-parser.add_argument("--viz_every", type=int, default=1000, help="plot every N steps")
+parser.add_argument("--expt_name", type=str, default="nn_default")
+parser.add_argument("--viz_every", type=int, default=100, help="plot every N steps")
 parser.add_argument(
     "--fixed_num_pdes",
     type=int,
@@ -128,16 +128,16 @@ if __name__ == "__main__":
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
 
-    def task_loss(key, model):
+    def task_loss_fn(key, model):
         # The input key is terminal
         k1, k2 = jax.random.split(key, 2)
         params = pde.sample_params(k1, args)
         points = pde.sample_points(k2, args.outer_points, params)
         return loss_fn(model, points, params)
 
-    def batch_loss(key, model):
+    def batch_loss_fn(key, model):
         keys = jax.random.split(key, args.bsize)
-        losses, aux = jax.vmap(task_loss, (0, None))(keys, model)
+        losses, aux = jax.vmap(task_loss_fn, (0, None))(keys, model)
         return np.sum(losses), {k: np.sum(v) for k, v in aux.items()}
 
     Field = pde.BaseField.partial(
@@ -181,7 +181,7 @@ if __name__ == "__main__":
 
     @jax.jit
     def validation_losses(model):
-        return task_loss(jax.random.PRNGKey(0), model)[0]
+        return task_loss_fn(jax.random.PRNGKey(0), model)[0]
 
     assert args.n_eval % 2 == 0
 
@@ -200,8 +200,8 @@ if __name__ == "__main__":
     for step in range(args.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
-            (batch_loss, loss_aux), batch_grad = jax.value_and_grad(
-                batch_loss, argnums=1, has_aux=True
+            (loss, loss_aux), batch_grad = jax.value_and_grad(
+                batch_loss_fn, argnums=1, has_aux=True
             )(subkey, optimizer.target)
             grad_norm = np.sqrt(
                 jax.tree_util.tree_reduce(
@@ -228,14 +228,14 @@ if __name__ == "__main__":
         log(
             "step: {}, loss: {}, val_loss: {}, val_err: {}, "
             "grad_norm: {}, time: {}".format(
-                step, batch_loss, val_loss, val_error, grad_norm, t.interval,
+                step, loss, val_loss, val_error, grad_norm, t.interval,
             )
         )
 
         if tflogger is not None:
             # A lot of these names have unnecessary "meta_"
             # just for consistency with maml_pde and leap_pde
-            tflogger.log_scalar("meta_loss", float(np.mean(batch_loss)), step)
+            tflogger.log_scalar("meta_loss", float(np.mean(loss)), step)
             tflogger.log_scalar("val_loss", float(np.mean(val_loss)), step)
 
             tflogger.log_scalar("val_error", float(val_error), step)
