@@ -1,3 +1,4 @@
+"""Use LEAP to amortize fitting a NN across a class of PDEs."""
 from jax.config import config
 
 import jax
@@ -212,14 +213,6 @@ if __name__ == "__main__":
         )
         return losses
 
-    grid = npo.zeros([101, 101, 2])
-    for i in range(101):
-        for j in range(101):
-            grid[i, j] += [i * 1.0 / 100, j * 1.0 / 100]
-    grid = np.array(grid, dtype=np.float32).reshape(-1, 2) * 2 - np.array(
-        [[1.0, 1.0]], dtype=np.float32
-    )
-
     assert args.n_eval % 2 == 0
 
     key, gt_key, gt_points_key = jax.random.split(key, 3)
@@ -248,7 +241,7 @@ if __name__ == "__main__":
                 )
             )
             if np.isfinite(meta_grad_norm):
-                if meta_grad_norm > min([100.0, i]):
+                if meta_grad_norm > min([100.0, step]):
                     log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad = jax.tree_util.tree_map(
                         lambda x: x / meta_grad_norm, meta_grad
@@ -357,8 +350,8 @@ if __name__ == "__main__":
         outfile.close()
 
     plt.figure()
-    pde.compare_plots_with_ground_truth(
-        optimizer.target, fenics_functions, gt_params,
+    trainer_util.compare_plots_with_ground_truth(
+        optimizer.target, pde, fenics_functions, gt_params, get_final_model, leap_def
     )
     if args.expt_name is not None:
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
