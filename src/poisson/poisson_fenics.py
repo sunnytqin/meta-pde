@@ -92,8 +92,9 @@ def solve_fenics(params, boundary_points=64, resolution=12):
 if __name__ == "__main__":
     c1 = -0.1
     c2 = 0.1
-
-    params = sample_params(jax.random.PRNGKey(0), parser.parse_args())
+    args = parser.parse_args()
+    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
+    params = sample_params(jax.random.PRNGKey(0), args)
 
     u = solve_fenics(params)
     fa.plot(u, title="solution")
