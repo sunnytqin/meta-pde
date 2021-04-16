@@ -1,0 +1,4 @@
+# Example run commands
+python -m src.nn_pde
+python -m src.nn_pde --pde nonlinear_stokes
+python -m src.leap_pde --inner_steps 8 --n_eval 2 --fixed_num_pdes 2

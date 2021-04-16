@@ -1,1 +1,0 @@
-python -m src.poisson.poisson_nn --outer_lr 5e-6 --outer_steps 100000 --vary_bc 1 --vary_geometry 1 --bc_weight 100. --vary_source 1 --siren 1 --num_layers 5 --layer_size 256 --boundary_points 2048 --domain_points 2048
