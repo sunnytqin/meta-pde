@@ -6,7 +6,7 @@ requirements
 - jax
 - flax
 - fenics
-- tensorboard/tensorflow = 2.1.0
+- tensorboard/tensorflow (version 2.0 above)
 - numpy, scipy, matplotlib
 
 relevant papers:
