@@ -138,8 +138,8 @@ if __name__ == "__main__":
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
 
         loss = args.bc_weight * np.sum(
-            [bl for bl in boundary_losses.values()]
-        ) + np.sum([dl for dl in domain_losses.values()])
+            np.array([bl for bl in boundary_losses.values()])
+        ) + np.sum(np.array([dl for dl in domain_losses.values()]))
 
         if args.sqrt_loss:
             loss = np.sqrt(loss)
