@@ -10,7 +10,8 @@ from flax import nn
 from functools import partial
 import pdb
 
-OMEGA0 = 10.0
+OMEGA = 1.
+OMEGA0 = 3.
 
 
 def siren_init(key, shape, dtype=np.float32):
@@ -19,14 +20,15 @@ def siren_init(key, shape, dtype=np.float32):
         key,
         shape,
         dtype,
-        -np.sqrt(6.0 / fan_in) / OMEGA0,
-        np.sqrt(6.0 / fan_in) / OMEGA0,
+        -np.sqrt(6.0 / fan_in) / OMEGA,
+        np.sqrt(6.0 / fan_in) / OMEGA,
     )
 
 
 def first_layer_siren_init(key, shape, dtype=np.float32):
     fan_in = shape[0]
-    return jax.random.uniform(key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in)
+    return (OMEGA0 / OMEGA) * jax.random.uniform(
+        key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in)
 
 
 def vmap_laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.0):
@@ -149,7 +151,8 @@ def nf_apply(
     for i, size in enumerate(sizes):
         a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
         if nonlinearity == np.sin:
-            a = a * OMEGA0  # omega0 in siren
+            # omega0 in siren, hacked so we can choose to only do it on first layer
+            a = a*OMEGA
         x = nonlinearity(a)
     out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init)
     return out  # dewhiten(out, mean_y, std_y)

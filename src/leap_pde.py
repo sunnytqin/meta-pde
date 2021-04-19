@@ -55,6 +55,8 @@ parser.add_argument(
     default=1024,
     help="num points in domain for validation",
 )
+parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
+                    "minimize the rmse instead of the mse")
 parser.add_argument("--inner_steps", type=int, default=10, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e5), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
@@ -127,6 +129,8 @@ if __name__ == "__main__":
             [bl for bl in boundary_losses.values()]
         ) + np.sum([dl for dl in domain_losses.values()])
 
+        if args.sqrt_loss:
+            loss = np.sqrt(loss)
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
 
@@ -134,8 +138,8 @@ if __name__ == "__main__":
         # The input key is terminal
         params = pde.sample_params(key, args)
 
-        def variational_energy_estimator(key, field_fn):
-            points = pde.sample_points(key, args.inner_points, params)
+        def variational_energy_estimator(inner_key, field_fn, params=params):
+            points = pde.sample_points(inner_key, args.inner_points, params)
             return loss_fn(field_fn, points, params)
 
         return variational_energy_estimator

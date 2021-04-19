@@ -72,9 +72,13 @@ parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size"
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
+parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
+                    "minimize the rmse instead of the mse")
 parser.add_argument("--siren", type=int, default=0, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=10.0, help="weight on bc loss")
+parser.add_argument("--outer_loss_decay", type=float,
+                    default=0.25, help="0. = just take final loss. 1.=sum all")
 parser.add_argument(
     "--bc_scale", type=float, default=2e-1, help="scale on random uniform bc"
 )
@@ -137,18 +141,23 @@ if __name__ == "__main__":
             [bl for bl in boundary_losses.values()]
         ) + np.sum([dl for dl in domain_losses.values()])
 
+        if args.sqrt_loss:
+            loss = np.sqrt(loss)
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
 
     def make_task_loss_fns(key):
         # The input key is terminal
-        k1, k2, k3 = jax.random.split(key, 3)
-        params = pde.sample_params(k1, args)
-        outer_points = pde.sample_points(k2, args.outer_points, params)
-        inner_points = pde.sample_points(k2, args.outer_points, params)
+        params = pde.sample_params(key, args)
 
-        inner_loss = lambda key, field_fn: loss_fn(field_fn, inner_points, params)
-        outer_loss = lambda key, field_fn: loss_fn(field_fn, outer_points, params)
+        def inner_loss(key, field_fn, params=params):
+            inner_points = pde.sample_points(key, args.inner_points, params)
+            return loss_fn(field_fn, inner_points, params)
+
+        def outer_loss(key, field_fn, params=params):
+            outer_points = pde.sample_points(key, args.outer_points, params)
+            return loss_fn(field_fn, outer_points, params)
+
         return inner_loss, outer_loss
 
     make_inner_opt = flax.optim.Momentum(learning_rate=args.inner_lr, beta=0.0).create
@@ -159,6 +168,7 @@ if __name__ == "__main__":
         inner_steps=args.inner_steps,
         n_batch_tasks=args.bsize,
         softplus_lrs=True,
+        outer_loss_decay=args.outer_loss_decay,
     )
 
     Field = pde.BaseField.partial(
@@ -288,13 +298,15 @@ if __name__ == "__main__":
 
         log(
             "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
-            "meta_grad_norm: {}, time: {}".format(
+            "meta_grad_norm: {}, time: {}, key: {}, subkey: {}".format(
                 step,
                 np.mean(meta_losses[0]),
                 np.mean(val_meta_losses[0]),
                 val_error,
                 meta_grad_norm,
                 t.interval,
+                key,
+                subkey,
             )
         )
         log(

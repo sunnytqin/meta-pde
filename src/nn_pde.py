@@ -54,6 +54,8 @@ parser.add_argument(
     default=2048,
     help="num points in domain for validation",
 )
+parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
+                    "minimize the rmse instead of the mse")
 parser.add_argument("--outer_steps", type=int, default=int(1e5), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
 parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size")
@@ -124,7 +126,8 @@ if __name__ == "__main__":
         loss = args.bc_weight * np.sum(
             [bl for bl in boundary_losses.values()]
         ) + np.sum([dl for dl in domain_losses.values()])
-
+        if args.sqrt_loss:
+            loss = np.sqrt(loss)
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
 

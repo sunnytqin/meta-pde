@@ -37,6 +37,10 @@ MamlDef = namedtuple(
         "inner_steps",  # int: num inner-loop optimization steps
         "n_batch_tasks",  # int: number of 'tasks' in a batch for a meta-train step
         "softplus_lrs",  # bool: whether to force positive learned inner learning rate
+        "outer_loss_decay",  # float: if None, only use outer loss at final step.
+            # if p is not None, use outer loss L = sum_{t=1 to T} L_t * p^(T-t),
+            # where L_t is the outer loss after step t, and T is the max num steps
+            # e.g. p=1 takes a sum of all losses, p=0 takes final only, p=0.5 geometric
     ],
 )
 
@@ -76,7 +80,8 @@ def maml_inner_step(key, opt, inner_loss_fn, inner_lr, softplus_lrs=False):
 
 
 def single_task_rollout(
-    maml_def, rollout_key, initial_model, inner_loss_fn, inner_lrs=None, inner_steps=-1
+    maml_def, rollout_key, initial_model, inner_loss_fn,
+    inner_lrs=None, inner_steps=-1, outer_loss_fn=None,
 ):
     """Roll out meta learned model on one task. Use for both training and deployment.
 
@@ -101,10 +106,12 @@ def single_task_rollout(
         assert inner_steps == -1
 
     def body_fn(carry, lr):
-        opt, key = carry
-        k1, k2 = jax.random.split(key)
+        opt, key, meta_loss = carry
+        k1, k2, k3 = jax.random.split(key, 3)
         opt, loss = maml_inner_step(k1, opt, inner_loss_fn, lr, maml_def.softplus_lrs)
-        return (opt, k2), loss
+        if outer_loss_fn is not None:
+            meta_loss = outer_loss_fn(k2, opt.target)[0] + meta_loss * maml_def.outer_loss_decay
+        return (opt, k3, meta_loss), loss
 
     inner_opt = maml_def.make_inner_opt(initial_model)
 
@@ -117,8 +124,8 @@ def single_task_rollout(
 
     # Loop over the body_fn for each inner_step, carrying opt and stacking losses
 
-    (final_opt, final_key), losses = jax.lax.scan(
-        body_fn, (inner_opt, rollout_key), inner_lrs
+    (final_opt, final_key, meta_loss_sum), losses = jax.lax.scan(
+        body_fn, (inner_opt, rollout_key, 0.), inner_lrs
     )
 
     # Cat the final loss to loss array (to have losses before and after each grad step)
@@ -130,7 +137,7 @@ def single_task_rollout(
         lambda x, y: np.append(x, y), losses, loss_final
     )
 
-    return final_opt.target, losses
+    return final_opt.target, (meta_loss_sum, losses)
 
 
 @partial(jax.jit, static_argnums=0)
@@ -139,12 +146,19 @@ def single_task_grad_and_losses(maml_def, key, initial_model, inner_lrs=None):
     task_key, rollout_key, outer_loss_key = jax.random.split(key, 3)
     inner_loss_fn, outer_loss_fn = maml_def.make_task_loss_fns(task_key)
 
-    def task_rollout_and_eval(model_and_lrs):
+    def task_rollout_and_eval(model_and_lrs,
+                              maml_def=maml_def,
+                              rollout_key=rollout_key,
+                              outer_loss_key=outer_loss_key,
+                              inner_loss_fn=inner_loss_fn,
+                              outer_loss_fn=outer_loss_fn,
+                              ):
         model, lrs = model_and_lrs
-        final_model, losses = single_task_rollout(
-            maml_def, rollout_key, model, inner_loss_fn, lrs
+        final_model, (outer_loss, losses) = single_task_rollout(
+            maml_def, rollout_key, model, inner_loss_fn, lrs,
+            outer_loss_fn=outer_loss_fn
         )
-        outer_loss, outer_aux = outer_loss_fn(outer_loss_key, final_model)
+        _, outer_aux = outer_loss_fn(outer_loss_key, final_model)
         return outer_loss, (losses, outer_aux)
 
     (meta_loss, (losses, outer_aux)), meta_grad = jax.value_and_grad(
@@ -243,6 +257,7 @@ def run_sinusoid():
         inner_steps=10,
         n_batch_tasks=32,
         softplus_lrs=True,
+        outer_loss_decay=0.7,
     )
 
     # Run the meta-train loop

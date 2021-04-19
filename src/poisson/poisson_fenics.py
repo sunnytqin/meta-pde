@@ -27,7 +27,6 @@ import fenics as fa
 import argparse
 from collections import namedtuple
 
-
 from .poisson_common import sample_params, boundary_conditions, source
 
 parser = argparse.ArgumentParser()
