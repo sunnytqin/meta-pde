@@ -66,7 +66,7 @@ def sample_params(key, args):
 def sample_points(key, n, params):
     k1, k2 = jax.random.split(key)
     points_on_boundary = sample_points_on_boundary(k1, n, params)
-    points_in_domain = sample_points_on_boundary(k2, n, params)
+    points_in_domain = sample_points_in_domain(k2, n, params)
     return (points_on_boundary, points_in_domain)
 
 
