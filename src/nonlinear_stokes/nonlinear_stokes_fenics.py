@@ -11,8 +11,10 @@ import numpy as np
 import pdb
 import argparse
 import jax
+from collections import namedtuple
 
 from .nonlinear_stokes_common import (
+    plot_solution,
     loss_fn,
     fenics_to_jax,
     sample_params,
@@ -135,16 +137,21 @@ def is_defined(xy, u):
 
 if __name__ == "__main__":
     args = parser.parse_args()
+    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
+
     params = sample_params(jax.random.PRNGKey(args.seed), args)
     source_params, bc_params, per_hole_params, num_holes = params
     print("params: ", params)
 
     u_p = solve_fenics(params)
 
+
     jax_fn = fenics_to_jax(u_p)
     points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
     print("Loss of solution: ", loss_fn(jax_fn, points, params))
-    pdb.set_trace()
+
+    plot_solution(u_p, params)
+    plt.show()
 
     u, p = u_p.split()
     # plot solution
