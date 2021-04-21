@@ -41,7 +41,8 @@ def loss_fn(potential_fn, points, params):
 def sample_params(key, args):
 
     if hasattr(args, 'fixed_num_pdes') and args.fixed_num_pdes is not None:
-        key = jax.random.PRNGKey(jax.random.randint(key, (), 0, args.fixed_num_pdes))
+        print('numer of pdes', args.fixed_num_pdes)
+        key = jax.random.PRNGKey(jax.random.randint(key, (1,), np.array([0]), np.array([args.fixed_num_pdes]))[0])
 
     k1, k2, k3 = jax.random.split(key, 3)
 
