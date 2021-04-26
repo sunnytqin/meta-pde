@@ -1,0 +1,51 @@
+bsize: 16
+n_eval: 16
+inner_lr:
+  { 'tuning': True,
+    'low_bound': -10,
+    'up_bound': -3,
+    'distribution': 'log',
+    'dtype': 'float' }
+outer_lr:
+  {'tuning': True,
+   'low_bound': -10,
+   'up_bound': -3,
+   'distribution': 'log',
+  'dtype': 'float'}
+lr_inner_lr: 1.0e-1
+outer_points: 128
+inner_points: 128
+validation_points: 2048
+inner_steps: 10
+outer_steps: 1000
+num_layers: 3
+layer_size: 64
+vary_source: 1
+vary_bc: 1
+vary_geometry: 1
+sqrt_loss: 0
+siren:
+  { 'tuning': True,
+    'low_bound': 0,
+    'up_bound': 2,
+    'distribution': 'uniform',
+    'dtype': 'int' }
+pcgrad: 0.0
+bc_weight: 10.0
+outer_loss_decay:
+  { 'tuning': True,
+    'low_bound': 0.0,
+    'up_bound': 1.0,
+    'distribution': 'uniform',
+    'dtype': 'float' }
+bc_scale:
+  { 'tuning': True,
+    'low_bound': -3,
+    'up_bound': 1.0,
+    'distribution': 'log',
+    'dtype': 'float' }
+pde: 'poisson'
+out_dir: 'src/hparam/maml_poisson_tuning'
+expt_name: None
+viz_every: 200
+fixed_num_pdes: 'None'
