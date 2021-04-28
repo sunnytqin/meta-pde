@@ -3,6 +3,8 @@ import jax.numpy as np
 import numpy as npo
 import pdb
 from functools import partial
+import argparse
+from collections import namedtuple
 
 import matplotlib.pyplot as plt
 
@@ -16,15 +18,23 @@ from ..nets.field import (
 )
 from ..util.jax_tools import tree_unstack
 
+parser = argparse.ArgumentParser()
 
-XMIN = -3.0
-XMAX = 3.0
+
+XMIN = -1.0
+XMAX = 1.0
 YMIN = -1.0
 YMAX = 1.0
 
 MAX_HOLES = 3
 
-MAX_SIZE = 0.8
+MAX_SIZE = 0.6
+
+parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
+parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
+parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
+parser.add_argument("--bc_scale", type=float, default=1e-2, help="bc scale")
+parser.add_argument("--seed", type=int, default=0, help="set random seed")
 
 
 def get_u(field_fn):
@@ -95,7 +105,8 @@ def loss_fn(field_fn, points, params):
     loss_inlet = np.mean(
         (
             field_fn(points_on_inlet)[:, :-1]
-            - bc_params[0] * np.ones_like(points_on_inlet)
+            - bc_params[0] * np.ones_like(points_on_inlet) *
+            np.array([1., 0.]).reshape(1, 2)
         )
         ** 2
     )
@@ -126,7 +137,7 @@ def loss_fn(field_fn, points, params):
 @partial(jax.jit, static_argnums=(1,))
 def sample_params(key, args):
 
-    if args.fixed_num_pdes is not None:
+    if hasattr(args, 'fixed_num_pdes') and args.fixed_num_pdes is not None:
         key = jax.random.PRNGKey(jax.random.randint(key, (), 0, args.fixed_num_pdes))
 
     k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
@@ -294,7 +305,7 @@ def sample_points_in_domain(key, n, params):
     xy = np.stack((xv.flatten(), yv.flatten()), axis=1)
 
     xy = xy + jax.random.uniform(
-        k1, minval=0.0, maxval=np.array([[dx, dy]]), shape=(1, 2)
+        k1, minval=0.0, maxval=np.array([[dx, dy]]), shape=(len(xy), 2)
     )
 
     in_hole = jax.vmap(
@@ -412,3 +423,31 @@ def plot_solution(u_p, params):
         linewidth=0.3,
         arrowsize=0.0,
     )  # , np.sqrt(U**2+V**2))
+
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
+    key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
+    params = sample_params(subkey, args)
+
+    for i in range(1, 10):
+        key, subkey = jax.random.split(key)
+        points = sample_points(subkey, 512, params)
+        points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
+        plt.subplot(2,2,1)
+        plt.scatter(points_on_inlet[:, 0], points_on_inlet[:, 1])
+        plt.xlabel("points on inlet")
+        plt.subplot(2,2,2)
+        plt.scatter(points_on_walls[:, 0], points_on_walls[:, 1])
+        plt.xlabel("points on walls")
+
+        plt.subplot(2,2,3)
+        plt.scatter(points_on_holes[:, 0], points_on_holes[:, 1])
+        plt.xlabel("points on holes")
+
+        plt.subplot(2,2,4)
+        plt.scatter(points_in_domain[:, 0], points_in_domain[:, 1])
+        plt.xlabel("points in domain")
+
+        plt.show()
