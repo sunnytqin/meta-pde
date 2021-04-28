@@ -138,7 +138,7 @@ def loss_fn(field_fn, points, params):
 def sample_params(key, args):
 
     if hasattr(args, 'fixed_num_pdes') and args.fixed_num_pdes is not None:
-        key = jax.random.PRNGKey(jax.random.randint(key, (), 0, args.fixed_num_pdes))
+        key = jax.random.PRNGKey(jax.random.randint(key, (1,), np.array([0]), np.array([args.fixed_num_pdes]))[0])
 
     k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
 
@@ -185,7 +185,7 @@ def is_in_hole(xy, pore_params, tol=1e-7):
     return r0 > length + tol
 
 
-@partial(jax.jit, static_argnums=(1, 2,))
+@partial(jax.jit, static_argnums=(1,))
 def sample_points(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2, k3, k4 = jax.random.split(key, 4)
@@ -292,8 +292,8 @@ def sample_points_in_domain(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2 = jax.random.split(key)
     ratio = (XMAX - XMIN) / (YMAX - YMIN)
-    n_x = np.int32(1.1 * np.sqrt(n) * np.sqrt(ratio))
-    n_y = np.int32(1.1 * np.sqrt(n) / np.sqrt(ratio))
+    n_x = npo.int32(1.1 * npo.sqrt(n) * npo.sqrt(ratio))
+    n_y = npo.int32(1.1 * npo.sqrt(n) / npo.sqrt(ratio))
     dx = (XMAX - XMIN) / n_x
     dy = (YMAX - YMIN) / n_y
 
