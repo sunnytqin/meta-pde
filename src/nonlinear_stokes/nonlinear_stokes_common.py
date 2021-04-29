@@ -435,19 +435,14 @@ if __name__ == '__main__':
         key, subkey = jax.random.split(key)
         points = sample_points(subkey, 512, params)
         points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
-        plt.subplot(2,2,1)
-        plt.scatter(points_on_inlet[:, 0], points_on_inlet[:, 1])
-        plt.xlabel("points on inlet")
-        plt.subplot(2,2,2)
-        plt.scatter(points_on_walls[:, 0], points_on_walls[:, 1])
-        plt.xlabel("points on walls")
-
-        plt.subplot(2,2,3)
-        plt.scatter(points_on_holes[:, 0], points_on_holes[:, 1])
-        plt.xlabel("points on holes")
-
-        plt.subplot(2,2,4)
-        plt.scatter(points_in_domain[:, 0], points_in_domain[:, 1])
-        plt.xlabel("points in domain")
+        plt.figure()
+        plt.subplot(1,1,1)
+        plt.scatter(points_on_inlet[:, 0], points_on_inlet[:, 1], label="points on inlet")
+        plt.scatter(points_on_walls[:, 0], points_on_walls[:, 1], label="points on walls")
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.scatter(points_on_holes[:, 0], points_on_holes[:, 1], label='points on holes')
+        plt.scatter(points_in_domain[:, 0], points_in_domain[:, 1], label='points in domain')
+        plt.legend()
 
         plt.show()
