@@ -150,18 +150,9 @@ if __name__ == "__main__":
     u_p = solve_fenics(params)
 
     x = np.array(u_p.function_space().tabulate_dof_coordinates()[:100])
-    sot = SecondOrderTaylorLookup(u_p, x)
 
     points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
-
-    all_points = np.concatenate(points)
-
-    u_p.set_allow_extrapolation(True)
-    sot_all = SecondOrderTaylorLookup(u_p, all_points)
-
-    print("Loss of solution: ", loss_fn(sot_all, points, params))
-
-    pdb.set_trace()
+    points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
 
     plot_solution(u_p, params)
     plt.show()
