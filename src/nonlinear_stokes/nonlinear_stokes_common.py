@@ -93,7 +93,7 @@ def loss_fenics(u, params):
     dev_stress = 2 * mu_fn * strain_rate
 
 
-def loss_domain_fn(field_fn, points_domain, params):
+def loss_domain_fn(field_fn, points_in_domain, params):
     source_params, bc_params, per_hole_params, n_holes = params
     div_stress = vmap_divergence_tensor(
         points_in_domain,
@@ -108,7 +108,7 @@ def loss_domain_fn(field_fn, points_domain, params):
     return np.mean(err_in_domain ** 2)
 
 
-def loss_inlet_fn(field_fn, points_inlet, params):
+def loss_inlet_fn(field_fn, points_on_inlet, params):
     source_params, bc_params, per_hole_params, n_holes = params
     return np.mean(
         (
@@ -213,7 +213,7 @@ def sample_points_on_inlet(key, n, params):
         k1, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
     )
     rhs_y = np.linspace(YMAX, YMIN, n, endpoint=False) + jax.random.uniform(
-        k2, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
+        k2, minval=-(YMAX - YMIN)/ n, maxval=0., shape=(1,)
     )
     lhs = np.stack([XMIN * np.ones(n), lhs_y], axis=1)
     rhs = np.stack([XMAX * np.ones(n), rhs_y], axis=1)
@@ -302,8 +302,10 @@ def sample_points_in_domain(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2 = jax.random.split(key)
     ratio = (XMAX - XMIN) / (YMAX - YMIN)
-    n_x = npo.int32(1.1 * npo.sqrt(n) * npo.sqrt(ratio))
-    n_y = npo.int32(1.1 * npo.sqrt(n) / npo.sqrt(ratio))
+    # total number of points is 2 * n
+    # so as long as the fraction of volume covered is << 1/2 we are ok
+    n_x = npo.int32(np.sqrt(2) * npo.sqrt(n) * npo.sqrt(ratio))
+    n_y = npo.int32(np.sqrt(2) * npo.sqrt(n) / npo.sqrt(ratio))
     dx = (XMAX - XMIN) / n_x
     dy = (YMAX - YMIN) / n_y
 
@@ -362,9 +364,6 @@ class SecondOrderTaylorLookup(object):
         x = x.reshape(-1, 2)
         dists = np.sum((self.x0s.reshape(1, -1, 2) - x.reshape(-1, 1, 2)) ** 2, axis=2)
         _, inds = jax.lax.top_k(-dists, 1)
-        print("inds shape: ", inds.shape)
-        # inds = inds.reshape(len(x))
-        print("inds: ", inds)
         x0 = self.x0s[inds]
         u0 = self.u0s[inds]
         g0 = self.g0s[inds]
