@@ -105,23 +105,20 @@ def loss_domain_fn(field_fn, points_in_domain, params):
     grad_p = jax.vmap(lambda x: jax.grad(get_p(field_fn))(x))(points_in_domain)
 
     err_in_domain = grad_p - div_stress
-    return np.mean(err_in_domain ** 2)
+    return err_in_domain ** 2
 
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    return np.mean(
-        (
+    return (
             field_fn(points_on_inlet)[:, :-1]
             - bc_params[0] * np.ones_like(points_on_inlet) *
             np.array([1., 0.]).reshape(1, 2)
-        )
-        ** 2
-    )
+        )** 2
 
 def loss_noslip_fn(field_fn, points_noslip, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    return np.mean(field_fn(points_noslip)[:, :-1] ** 2)
+    return field_fn(points_noslip)[:, :-1] ** 2
 
 
 def loss_fn(field_fn, points, params):
@@ -130,10 +127,11 @@ def loss_fn(field_fn, points, params):
 
     p_in_domain = get_p(field_fn)(points_in_domain)
     return (
-        {"loss_noslip": loss_noslip_fn(field_fn, points_noslip, params),
-         "loss_inlet": loss_inlet_fn(field_fn, points_on_inlet, params)},
+        {"loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
+         "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params))},
         {
-            "loss_in_domain": loss_domain_fn(field_fn, points_in_domain, params),
+            "loss_in_domain": np.mean(
+                loss_domain_fn(field_fn, points_in_domain, params)),
             "mean_square_pressure": np.mean(p_in_domain) ** 2,
         },
     )
