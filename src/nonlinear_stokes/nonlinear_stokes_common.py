@@ -93,24 +93,8 @@ def loss_fenics(u, params):
     dev_stress = 2 * mu_fn * strain_rate
 
 
-def loss_fn(field_fn, points, params):
-    points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
-    points_noslip = np.concatenate([points_on_walls, points_on_holes])
-
+def loss_domain_fn(field_fn, points_domain, params):
     source_params, bc_params, per_hole_params, n_holes = params
-
-    # pdb.set_trace()
-
-    loss_noslip = np.mean(field_fn(points_noslip)[:, :-1] ** 2)
-    loss_inlet = np.mean(
-        (
-            field_fn(points_on_inlet)[:, :-1]
-            - bc_params[0] * np.ones_like(points_on_inlet) *
-            np.array([1., 0.]).reshape(1, 2)
-        )
-        ** 2
-    )
-
     div_stress = vmap_divergence_tensor(
         points_in_domain,
         lambda x, field_fn=get_u(
@@ -121,14 +105,37 @@ def loss_fn(field_fn, points, params):
     grad_p = jax.vmap(lambda x: jax.grad(get_p(field_fn))(x))(points_in_domain)
 
     err_in_domain = grad_p - div_stress
-    loss_in_domain = np.mean(err_in_domain ** 2)
+    return np.mean(err_in_domain ** 2)
+
+
+def loss_inlet_fn(field_fn, points_inlet, params):
+    source_params, bc_params, per_hole_params, n_holes = params
+    return np.mean(
+        (
+            field_fn(points_on_inlet)[:, :-1]
+            - bc_params[0] * np.ones_like(points_on_inlet) *
+            np.array([1., 0.]).reshape(1, 2)
+        )
+        ** 2
+    )
+
+
+def loss_noslip_fn(field_fn, points_noslip, params):
+    source_params, bc_params, per_hole_params, n_holes = params
+    return np.mean(field_fn(points_noslip)[:, :-1] ** 2)
+
+
+def loss_fn(field_fn, points, params):
+    points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
+    points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
     p_in_domain = get_p(field_fn)(points_in_domain)
 
     return (
-        {"loss_noslip": loss_noslip, "loss_inlet": loss_inlet},
+        {"loss_noslip": loss_noslip_fn(field_fn, points_noslip, params),
+         "loss_inlet": loss_inlet_fn(field_fn, points_on_inlet, params)},
         {
-            "loss_in_domain": loss_in_domain,
+            "loss_in_domain": loss_domain_fn(field_fn, points_in_domain, params),
             "mean_square_pressure": np.mean(p_in_domain) ** 2,
         },
     )
@@ -207,7 +214,8 @@ def sample_points_on_inlet(key, n, params):
         key, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
     )
     lhs = np.stack([XMIN * np.ones(n), lhs_y], axis=1)
-    return lhs
+    rhs = np.stack([XMAX * np.ones(n), YMAX-lhs_y], axis=1)
+    return np.concatenate([lhs, rhs])
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -329,26 +337,70 @@ def is_defined(xy, u):
         return False
 
 
-def fenics_to_jax(u):
-    X, Y = np.meshgrid(np.linspace(XMIN, XMAX, 901), np.linspace(YMIN, YMAX, 301))
+class SecondOrderTaylorLookup(object):
+    def __init__(self, u, x0, d=3):
+        x0 = np.array(x0)
+        print("x0 shape: ", x0.shape)
+        Vg = fa.TensorFunctionSpace(u.function_space().mesh(), 'P', 2,
+                                    shape=(d, 2))
+        ug = fa.project(fa.grad(u), Vg)
+        ug.set_allow_extrapolation(True)
+        Vh = fa.TensorFunctionSpace(u.function_space().mesh(), 'P', 2,
+                                    shape=(d, 2, 2))
+        uh = fa.project(fa.grad(ug), Vh)
+        uh.set_allow_extrapolation(True)
+
+        self.x0s = x0.reshape(len(x0), 2)
+        self.u0s = np.array([u(npo.array(xi)) for xi in x0])
+        self.g0s = np.array([ug(npo.array(xi)) for xi in x0])
+        self.h0s = np.array([uh(npo.array(xi)) for xi in x0])
+
+
+    def __call__(self, x):
+        x = x.reshape(-1, 2)
+        dists = np.sum((self.x0s.reshape(1, -1, 2) - x.reshape(-1, 1, 2)) ** 2, axis=2)
+        _, inds = jax.lax.top_k(-dists, 1)
+        print("inds shape: ", inds.shape)
+        # inds = inds.reshape(len(x))
+        print("inds: ", inds)
+        x0 = self.x0s[inds]
+        u0 = self.u0s[inds]
+        g0 = self.g0s[inds]
+        h0 = self.h0s[inds]
+        return jax.vmap(single_second_order_taylor_eval)(x, x0, u0, g0, h0).squeeze()
+
+
+@jax.jit
+def single_second_order_taylor_eval(xi, x0i, u0, g0, h0, d=3):
+    dx = xi - x0i
+    return u0.reshape(d) + np.matmul(
+        g0.reshape(d, 2), dx.reshape(2, 1)).reshape(d) + np.matmul(
+            dx.reshape(1, 1, 2), np.matmul(h0.reshape(d, 2, 2), dx.reshape(1, 2, 1))
+        ).reshape(d) / 2.
+
+
+def fenics_to_jax(u, gridsize=1000, temp=1.):
+    X, Y = np.meshgrid(np.linspace(XMIN, XMAX, 3*gridsize),
+                       np.linspace(YMIN, YMAX, gridsize))
+
+    XY = [(x, y) for x, y in zip(X.reshape(-1), Y.reshape(-1))
+          if is_defined([x, y], u)]
     U = [
-        u(x, y) if is_defined([x, y], u) else np.array([0.0, 0.0, 0.0])
-        for x, y in zip(X.reshape(-1), Y.reshape(-1))
+        u(x, y) for x, y in XY
     ]
     U = np.array(U)
-    XY = np.stack([X.reshape(-1), Y.reshape(-1)], axis=1)
+    XY = np.array(XY)
     # U = np.array(U).reshape(121, 41, 3)
 
-    def interpolated_function(x):
-        # 9-nearest-neighbor interpolation with low-temperature softmax
+    def interpolated_function(x, temp=temp):
+        # 5-nearest-neighbor interpolation with low-temperature softmax
         x = x.reshape(-1, 2)
         bsize = x.shape[1]
         dists = np.sum((XY - x) ** 2, axis=1)
-        _, inds = jax.lax.top_k(-dists, 9)
+        _, inds = jax.lax.top_k(-dists, 5)
         dists = dists[inds]
         vals = U[inds]
-
-        weights = jax.nn.softmax(1.0 / (dists + 1e-7)).reshape(-1, 1)
+        weights = jax.nn.softmax(temp / (dists + 1e-14)).reshape(-1, 1)
         return (weights * vals).sum(axis=0).reshape(3)
 
     def maybe_vmapped(x):
@@ -360,6 +412,14 @@ def fenics_to_jax(u):
             raise Exception("Wrong shape!")
 
     return maybe_vmapped
+
+
+def error_on_coords(fenics_fn, jax_fn, coords=None):
+    if coords is None:
+        coords = np.array(fenics_fn.function_space().tabulate_dof_coordinates())
+    fenics_vals = np.array([fenics_fn(x) for x in coords])
+    jax_vals = jax_fn(coords)
+    return np.mean((fenics_vals-jax_vals)**2)
 
 
 def plot_solution(u_p, params):

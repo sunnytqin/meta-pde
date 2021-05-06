@@ -17,6 +17,8 @@ from .nonlinear_stokes_common import (
     plot_solution,
     loss_fn,
     fenics_to_jax,
+    SecondOrderTaylorLookup,
+    error_on_coords,
     sample_params,
     sample_points,
     is_in_hole,
@@ -65,13 +67,12 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     domain = domain - obstacle
 
     mesh = mshr.generate_mesh(domain, resolution)
-    V = fa.FunctionSpace(mesh, "CG", 2)
 
     def inlet(x, on_boundary):
-        return on_boundary and (fa.near(x[0], XMIN))
+        return on_boundary and (fa.near(x[0], XMIN) or fa.near(x[0], XMAX))
 
     def walls(x, on_boundary):
-        return on_boundary and not (fa.near(x[0], XMAX))
+        return on_boundary
 
     V_h = fa.VectorElement("CG", mesh.ufl_cell(), 2)
     Q_h = fa.FiniteElement("CG", mesh.ufl_cell(), 1)
@@ -118,11 +119,14 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         },
     )
 
-    # p0 = fa.assemble(p*fa.dx)
-    # pdb.set_trace()
-    # vec = np.array(u_p.vector()).reshape(-1, 3)
-    # vec[:, 2] -= p0
-    # u_p.vector()[:] = vec.reshape(-1) # Zero mean
+    # Enforce zero mean pressure
+    u1, p1 = fa.split(fa.interpolate(fa.Constant((1., 1., 1.)), W))
+
+    mean_pressure = fa.assemble(p * fa.dx) / fa.assemble(p1 * fa.dx)
+
+    # Every point is a weighted sum of coefs with weight ssumming to 1,
+    # so just subtract mean pressure from all the coefs corresponding to pressure
+    u_p.vector()[W.sub(1).dofmap().dofs()] -= mean_pressure
 
     return u_p
 
@@ -145,10 +149,19 @@ if __name__ == "__main__":
 
     u_p = solve_fenics(params)
 
+    x = np.array(u_p.function_space().tabulate_dof_coordinates()[:100])
+    sot = SecondOrderTaylorLookup(u_p, x)
 
-    jax_fn = fenics_to_jax(u_p)
     points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
-    print("Loss of solution: ", loss_fn(jax_fn, points, params))
+
+    all_points = np.concatenate(points)
+
+    u_p.set_allow_extrapolation(True)
+    sot_all = SecondOrderTaylorLookup(u_p, all_points)
+
+    print("Loss of solution: ", loss_fn(sot_all, points, params))
+
+    pdb.set_trace()
 
     plot_solution(u_p, params)
     plt.show()
