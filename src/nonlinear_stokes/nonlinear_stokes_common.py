@@ -119,7 +119,6 @@ def loss_inlet_fn(field_fn, points_inlet, params):
         ** 2
     )
 
-
 def loss_noslip_fn(field_fn, points_noslip, params):
     source_params, bc_params, per_hole_params, n_holes = params
     return np.mean(field_fn(points_noslip)[:, :-1] ** 2)
@@ -130,7 +129,6 @@ def loss_fn(field_fn, points, params):
     points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
     p_in_domain = get_p(field_fn)(points_in_domain)
-
     return (
         {"loss_noslip": loss_noslip_fn(field_fn, points_noslip, params),
          "loss_inlet": loss_inlet_fn(field_fn, points_on_inlet, params)},
@@ -210,11 +208,15 @@ def sample_points(key, n, params):
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_on_inlet(key, n, params):
     _, _, per_hole_params, n_holes = params
+    k1, k2 = jax.random.split(key)
     lhs_y = np.linspace(YMIN, YMAX, n, endpoint=False) + jax.random.uniform(
-        key, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
+        k1, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
+    )
+    rhs_y = np.linspace(YMAX, YMIN, n, endpoint=False) + jax.random.uniform(
+        k2, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
     )
     lhs = np.stack([XMIN * np.ones(n), lhs_y], axis=1)
-    rhs = np.stack([XMAX * np.ones(n), YMAX-lhs_y], axis=1)
+    rhs = np.stack([XMAX * np.ones(n), rhs_y], axis=1)
     return np.concatenate([lhs, rhs])
 
 
@@ -340,7 +342,6 @@ def is_defined(xy, u):
 class SecondOrderTaylorLookup(object):
     def __init__(self, u, x0, d=3):
         x0 = np.array(x0)
-        print("x0 shape: ", x0.shape)
         Vg = fa.TensorFunctionSpace(u.function_space().mesh(), 'P', 2,
                                     shape=(d, 2))
         ug = fa.project(fa.grad(u), Vg)
@@ -350,11 +351,12 @@ class SecondOrderTaylorLookup(object):
         uh = fa.project(fa.grad(ug), Vh)
         uh.set_allow_extrapolation(True)
 
+        u.set_allow_extrapolation(True)
         self.x0s = x0.reshape(len(x0), 2)
         self.u0s = np.array([u(npo.array(xi)) for xi in x0])
         self.g0s = np.array([ug(npo.array(xi)) for xi in x0])
         self.h0s = np.array([uh(npo.array(xi)) for xi in x0])
-
+        u.set_allow_extrapolation(False)
 
     def __call__(self, x):
         x = x.reshape(-1, 2)
@@ -379,17 +381,23 @@ def single_second_order_taylor_eval(xi, x0i, u0, g0, h0, d=3):
         ).reshape(d) / 2.
 
 
-def fenics_to_jax(u, gridsize=1000, temp=1.):
+def fenics_to_jax(u, gridsize=300, temp=1.):
     X, Y = np.meshgrid(np.linspace(XMIN, XMAX, 3*gridsize),
                        np.linspace(YMIN, YMAX, gridsize))
 
-    XY = [(x, y) for x, y in zip(X.reshape(-1), Y.reshape(-1))
-          if is_defined([x, y], u)]
+    XY = list(zip(X.reshape(-1), Y.reshape(-1)))
+
+    mask = [is_defined([x, y], u)
+            for x, y in XY]
+
+    u.set_allow_extrapolation(True)
     U = [
         u(x, y) for x, y in XY
     ]
+    u.set_allow_extrapolation(False)
     U = np.array(U)
     XY = np.array(XY)
+    mask = np.array(mask, dtype=np.float32)
     # U = np.array(U).reshape(121, 41, 3)
 
     def interpolated_function(x, temp=temp):
@@ -400,7 +408,9 @@ def fenics_to_jax(u, gridsize=1000, temp=1.):
         _, inds = jax.lax.top_k(-dists, 5)
         dists = dists[inds]
         vals = U[inds]
-        weights = jax.nn.softmax(temp / (dists + 1e-14)).reshape(-1, 1)
+        is_defined_mask = mask[inds]
+        weights = jax.nn.softmax(
+            is_defined_mask * temp / (dists + 1e-14)).reshape(-1, 1)
         return (weights * vals).sum(axis=0).reshape(3)
 
     def maybe_vmapped(x):
