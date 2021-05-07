@@ -302,8 +302,8 @@ def sample_points_in_domain(key, n, params):
     ratio = (XMAX - XMIN) / (YMAX - YMIN)
     # total number of points is 2 * n
     # so as long as the fraction of volume covered is << 1/2 we are ok
-    n_x = npo.int32(np.sqrt(2) * npo.sqrt(n) * npo.sqrt(ratio))
-    n_y = npo.int32(np.sqrt(2) * npo.sqrt(n) / npo.sqrt(ratio))
+    n_x = npo.int32(npo.sqrt(2) * npo.sqrt(n) * npo.sqrt(ratio))
+    n_y = npo.int32(npo.sqrt(2) * npo.sqrt(n) / npo.sqrt(ratio))
     dx = (XMAX - XMIN) / n_x
     dy = (YMAX - YMIN) / n_y
 
@@ -344,11 +344,11 @@ class SecondOrderTaylorLookup(object):
         x0 = np.array(x0)
         Vg = fa.TensorFunctionSpace(u.function_space().mesh(), 'P', 2,
                                     shape=(d, 2))
-        ug = fa.project(fa.grad(u), Vg)
+        ug = fa.project(fa.grad(u), Vg, solver_type="mumps")
         ug.set_allow_extrapolation(True)
         Vh = fa.TensorFunctionSpace(u.function_space().mesh(), 'P', 2,
                                     shape=(d, 2, 2))
-        uh = fa.project(fa.grad(ug), Vh)
+        uh = fa.project(fa.grad(ug), Vh, solver_type="mumps")
         uh.set_allow_extrapolation(True)
 
         u.set_allow_extrapolation(True)
