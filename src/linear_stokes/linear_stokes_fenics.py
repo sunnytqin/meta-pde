@@ -108,6 +108,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
             "newton_solver": {
                 "maximum_iterations": int(1000),
                 "relaxation_parameter": 0.3,
+                "linear_solver": "mumps",
             }
         },
     )
