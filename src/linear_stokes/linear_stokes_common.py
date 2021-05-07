@@ -85,15 +85,9 @@ def deviatoric_stress(x, field_fn, source_params):
 
     return 2 * mu_fn * strain_rate
 
-def loss_fenics(u, params):
-    source_params, bc_params, per_hole_params, n_holes = params
-    strain_rate = (fa.grad(u) + fa.grad(u).T) / 2
-    effective_sr = fa.sqrt(0.5 * fa.inner(strain_rate, strain_rate))
-    mu_fn = source_params[0] * effective_sr ** (-source_params[1])
-    dev_stress = 2 * mu_fn * strain_rate
-
 
 def loss_divu_fn(field_fn, points_in_domain, params):
+    # force div(u) = 0
     source_params, bc_params, per_hole_params, n_holes = params
     div_u = vmap_divergence(
         points_in_domain,
@@ -104,16 +98,17 @@ def loss_divu_fn(field_fn, points_in_domain, params):
 
 
 def loss_stress_fn(field_fn, points_in_domain, params):
+    # force div(grad(u) - p * I) = 0
     source_params, bc_params, per_hole_params, n_holes = params
 
     gradu_fn = jax.jacfwd(get_u(field_fn))
 
-    gradu_minus_p_fn = lambda x: gradu_fn(x) - get_p(field_fn)(x)*np.eye(2)
+    gradu_plus_p_fn = lambda x: gradu_fn(x) + get_p(field_fn)(x)*np.eye(2)
 
-    div_gradu_minus_p = vmap_divergence_tensor(
-        points_in_domain, gradu_minus_p_fn
+    div_gradu_plus_p = vmap_divergence_tensor(
+        points_in_domain, gradu_plus_p_fn
     )
-    return np.mean(div_gradu_minus_p**2, axis=1)
+    return np.mean(div_gradu_plus_p**2, axis=1)
 
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):
@@ -141,8 +136,7 @@ def loss_fn(field_fn, points, params):
             "loss_stress": np.mean(
                 loss_stress_fn(field_fn, points_in_domain, params)),
             "loss_divu": np.mean(
-                loss_divu_fn(field_fn, points_in_domain, params)),
-            "mean_square_pressure": np.mean(p_in_domain) ** 2,
+                loss_divu_fn(field_fn, points_in_domain, params))
         },
     )
 

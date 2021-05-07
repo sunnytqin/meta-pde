@@ -33,7 +33,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--bc_scale", type=float, default=1e4, help="bc scale")
+parser.add_argument("--bc_scale", type=float, default=1e1, help="bc scale")
 parser.add_argument("--seed", type=int, default=0, help="set random seed")
 
 
@@ -96,7 +96,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
 
     F = (
         fa.inner(fa.grad(u), fa.grad(v))* fa.dx
-        - p * fa.div(v) * fa.dx
+        + p * fa.div(v) * fa.dx
         + q * fa.div(u) * fa.dx
     )
 

@@ -11,9 +11,7 @@ from jax.experimental import optimizers
 from .util.tensorboard_logger import Logger as TFLogger
 
 from .nets import maml
-
-from .poisson import poisson_def
-from .nonlinear_stokes import nonlinear_stokes_def
+from .get_pde import get_pde
 
 from functools import partial
 import flax
@@ -41,11 +39,11 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=1, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=2, help="num eval tasks")
-parser.add_argument("--outer_lr", type=float, default=3e-4, help="outer learning rate")
+parser.add_argument("--outer_lr", type=float, default=1e-5, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
-    default=64,
+    default=1024,
     help="num support points on the boundary and in domain",
 )
 parser.add_argument(
@@ -58,20 +56,22 @@ parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
                     "minimize the rmse instead of the mse")
 parser.add_argument("--outer_steps", type=int, default=int(1e5), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
-parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size")
+parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size")
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument("--siren", type=int, default=0, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
-parser.add_argument("--bc_weight", type=float, default=10.0, help="weight on bc loss")
+parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
 parser.add_argument(
-    "--bc_scale", type=float, default=2e-1, help="scale on random uniform bc"
+    "--bc_scale", type=float, default=1., help="scale on random uniform bc"
 )
-parser.add_argument("--pde", type=str, default="poisson", help="which PDE")
+parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="nn_default")
 parser.add_argument("--viz_every", type=int, default=100, help="plot every N steps")
+parser.add_argument("--measure_grad_norm_every", type=int, default=100, help="plot every N steps")
+
 parser.add_argument(
     "--fixed_num_pdes",
     type=int,
@@ -88,12 +88,7 @@ if __name__ == "__main__":
     # make into a hashable, immutable namedtuple
     args = namedtuple("ArgsTuple", vars(args))(**vars(args))
 
-    if args.pde == "poisson":
-        pde = poisson_def
-    elif args.pde == "nonlinear_stokes":
-        pde = nonlinear_stokes_def
-    else:
-        raise Exception("Unknown PDE")
+    pde = get_pde(args.pde)
 
     if args.expt_name is not None:
         if not os.path.exists(args.out_dir):
@@ -120,17 +115,21 @@ if __name__ == "__main__":
         tflogger = None
     # --------------------- Defining the meta-training algorithm --------------------
 
+    log(str(args))
+
+
     def loss_fn(field_fn, points, params):
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
 
         loss = args.bc_weight * np.sum(
             np.array([bl for bl in boundary_losses.values()])
         ) + np.sum(np.array([dl for dl in domain_losses.values()]))
-        
+
         if args.sqrt_loss:
             loss = np.sqrt(loss)
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
+
 
     def task_loss_fn(key, model):
         # The input key is terminal
@@ -139,10 +138,26 @@ if __name__ == "__main__":
         points = pde.sample_points(k2, args.outer_points, params)
         return loss_fn(model, points, params)
 
+    @jax.jit
     def batch_loss_fn(key, model):
         keys = jax.random.split(key, args.bsize)
         losses, aux = jax.vmap(task_loss_fn, (0, None))(keys, model)
         return np.sum(losses), {k: np.sum(v) for k, v in aux.items()}
+
+    def get_grad_norms(key, model):
+        _, loss_dict = batch_loss_fn(key, model)
+        losses_and_grad_norms = {}
+        for k in loss_dict:
+            single_loss_fn = lambda model: batch_loss_fn(key, model)[1][k]
+            loss_val, loss_grad = jax.value_and_grad(single_loss_fn)(model)
+            loss_grad_norm = np.sqrt(
+                jax.tree_util.tree_reduce(
+                    lambda x, y: x + y,
+                    jax.tree_util.tree_map(lambda x: np.sum(x ** 2), loss_grad),
+                )
+            )
+            losses_and_grad_norms[k] = (float(loss_val), float(loss_grad_norm))
+        return losses_and_grad_norms
 
     Field = pde.BaseField.partial(
         sizes=[args.layer_size for _ in range(args.num_layers)],
@@ -153,7 +168,7 @@ if __name__ == "__main__":
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-    optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(
+    optimizer = flax.optim.Adam(learning_rate=args.outer_lr, beta2=0.98).create(
         flax.nn.Model(Field, init_params)
     )
 
@@ -181,7 +196,15 @@ if __name__ == "__main__":
         coefs = vmap(make_coef_func, (0, None, 0, 0))(
             keys, model, ground_truth_params, points,
         )
-        return np.sqrt(np.mean((coefs - ground_truth_vals.reshape(coefs.shape)) ** 2))
+        gt = ground_truth_vals.reshape(coefs.shape)
+
+        # this is testing if just not comparing pressures will help
+        # todo(alex): put this everywhere or remove it
+        if coefs.shape[2] > 2:
+            coefs = coefs[:, :, :2]
+            gt = gt[:, :, :2]
+
+        return np.sqrt(np.mean((coefs - gt) ** 2))
 
     @jax.jit
     def validation_losses(model):
@@ -207,6 +230,61 @@ if __name__ == "__main__":
             (loss, loss_aux), batch_grad = jax.value_and_grad(
                 batch_loss_fn, argnums=1, has_aux=True
             )(subkey, optimizer.target)
+
+            # ---- This big section is logging a bunch of debug stats
+            # loss grad norms; plotting the sampled points; plotting the vals at those
+            # points; plotting the losses at those points.
+
+            # Todo (alex) -- see if we can clean it up, and maybe also do it in maml etc
+            if args.measure_grad_norm_every > 0 and step % args.measure_grad_norm_every == 0:
+                loss_vals_and_grad_norms = get_grad_norms(subkey, optimizer.target)
+                print("loss vals and grad norms: ", loss_vals_and_grad_norms)
+                if tflogger is not None:
+                    for k in loss_vals_and_grad_norms:
+                        tflogger.log_scalar("grad_norm_{}".format(k),
+                                            float(loss_vals_and_grad_norms[k][1]),
+                                            step)
+                    _k1, _k2 = jax.random.split(jax.random.split(subkey, args.bsize)[0],
+                                                2)
+                    _params = pde.sample_params(_k1, args)
+                    _points = pde.sample_points(_k2, args.outer_points, _params)
+                    plt.figure()
+                    for _pointsi in _points:
+                        plt.scatter(_pointsi[:, 0], _pointsi[:, 1])
+                    tflogger.log_plots("Points", [plt.gcf()], step)
+                    _all_points = np.concatenate(_points)
+                    _vals = optimizer.target(_all_points)
+                    _boundary_losses, _domain_losses = jax.vmap(
+                        lambda x: pde.loss_fn(
+                            optimizer.target,
+                            (x.reshape(1, -1) for _ in range(len(_points))),
+                            _params))(_all_points)
+                    _all_losses = {**_boundary_losses, **_domain_losses}
+                    for _losskey in _all_losses:
+                        #print(_losskey)
+                        plt.figure()
+                        _loss = _all_losses[_losskey]
+                        #print(_loss.shape)
+                        while len(_loss.shape) > 1:
+                            _loss = _loss.mean(axis=1)
+                        clrs = plt.scatter(_all_points[:, 0], _all_points[:, 1],
+                                           c=_loss[:len(_all_points)])
+                        plt.colorbar(clrs)
+                        tflogger.log_plots("{}".format(_losskey),
+                                           [plt.gcf()], step)
+
+                    for dim in range(_vals.shape[1]):
+                        plt.figure()
+                        clrs = plt.scatter(_all_points[:, 0], _all_points[:, 1],
+                                           c=_vals[:, dim])
+                        plt.colorbar(clrs)
+                        tflogger.log_plots("Outputs dim {}".format(dim), [plt.gcf()], step)
+
+            if step < 250:
+                batch_grad = jax.tree_util.tree_map(
+                    lambda x: x * (step+1) / 250,
+                    batch_grad
+                )
             grad_norm = np.sqrt(
                 jax.tree_util.tree_reduce(
                     lambda x, y: x + y,
@@ -222,6 +300,7 @@ if __name__ == "__main__":
                 optimizer = optimizer.apply_gradient(batch_grad)
             else:
                 log("NaN grad!")
+
 
         val_error = vmap_validation_error(
             optimizer.target, gt_params, coords, fenics_vals,
@@ -247,6 +326,7 @@ if __name__ == "__main__":
             tflogger.log_scalar("step_time", t.interval, step)
             for k in loss_aux:
                 tflogger.log_scalar("meta_" + k, float(np.mean(loss_aux[k])), step)
+
 
             if step % args.viz_every == 0:
                 # These take lots of filesize so only do them sometimes

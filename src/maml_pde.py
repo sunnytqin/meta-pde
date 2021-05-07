@@ -13,8 +13,8 @@ from .util.tensorboard_logger import Logger as TFLogger
 
 from .nets import maml
 
-from .poisson import poisson_def
-from .nonlinear_stokes import nonlinear_stokes_def
+from .get_pde import get_pde
+
 
 from functools import partial
 import flax
@@ -102,12 +102,7 @@ if __name__ == "__main__":
     # make into a hashable, immutable namedtuple
     args = namedtuple("ArgsTuple", vars(args))(**vars(args))
 
-    if args.pde == "poisson":
-        pde = poisson_def
-    elif args.pde == "nonlinear_stokes":
-        pde = nonlinear_stokes_def
-    else:
-        raise Exception("Unknown PDE")
+    pde = get_pde(args.pde)
 
     if args.expt_name is not None:
         if not os.path.exists(args.out_dir):

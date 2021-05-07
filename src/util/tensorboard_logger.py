@@ -52,12 +52,13 @@ class Logger(object):
             # Write the image to a string
             s = BytesIO()
             plt.figure(fig.number)
-            plt.savefig(s, format="png", dpi=800)
+            plt.savefig(s, format="png", dpi=200)
             # width, height = fig.get_size_inches() * fig.get_dpi()
             # width = int(width)
             # height = int(height)
             # Create an Image object
             images.append(s)
+        plt.close('all')
 
         self.log_images(tag, images, step)
 

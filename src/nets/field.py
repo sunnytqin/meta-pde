@@ -10,8 +10,8 @@ from flax import nn
 from functools import partial
 import pdb
 
-OMEGA = 1.
-OMEGA0 = 3.
+OMEGA = 10.
+OMEGA0 = 10.
 
 
 def siren_init(key, shape, dtype=np.float32):
