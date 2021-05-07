@@ -73,6 +73,7 @@ def deviatoric_stress(x, field_fn, source_params):
         deviatoric stress tau
     """
     assert len(x.shape) == 1
+    print(x.shape)
     dtype = x.dtype
     jac = jax.jacfwd(lambda x: field_fn(x).squeeze())(x)
 
@@ -83,7 +84,6 @@ def deviatoric_stress(x, field_fn, source_params):
     mu_fn = source_params[0] * effective_sr ** (-source_params[1])
 
     return 2 * mu_fn * strain_rate
-
 
 def loss_fenics(u, params):
     source_params, bc_params, per_hole_params, n_holes = params
@@ -99,7 +99,8 @@ def loss_domain_fn(field_fn, points_in_domain, params):
         points_in_domain,
         lambda x, field_fn=get_u(
             field_fn
-        ), source_params=source_params: deviatoric_stress(x, field_fn, source_params),
+        ), source_params=source_params: deviatoric_stress(
+            x, field_fn, source_params),
     )
 
     grad_p = jax.vmap(lambda x: jax.grad(get_p(field_fn))(x))(points_in_domain)
