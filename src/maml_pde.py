@@ -42,21 +42,21 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=1e-3, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=3e-4, help="outer learning rate")
+parser.add_argument("--inner_lr", type=float, default=3e-5, help="inner learning rate")
+parser.add_argument("--outer_lr", type=float, default=1e-5, help="outer learning rate")
 parser.add_argument(
     "--lr_inner_lr", type=float, default=3e-1, help="lr for inner learning rate"
 )
 parser.add_argument(
     "--outer_points",
     type=int,
-    default=128,
+    default=256,
     help="num query points on the boundary and in domain",
 )
 parser.add_argument(
     "--inner_points",
     type=int,
-    default=128,
+    default=256,
     help="num support points on the boundary and in domain",
 )
 parser.add_argument(
@@ -66,26 +66,26 @@ parser.add_argument(
     help="num points in domain for validation",
 )
 parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
-parser.add_argument("--outer_steps", type=int, default=int(1e5), help="num outer steps")
+parser.add_argument("--outer_steps", type=int, default=int(1e6), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
-parser.add_argument("--layer_size", type=int, default=64, help="fcnn layer size")
+parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size")
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
                     "minimize the rmse instead of the mse")
-parser.add_argument("--siren", type=int, default=0, help="1=true.")
+parser.add_argument("--siren", type=int, default=1, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
-parser.add_argument("--bc_weight", type=float, default=10.0, help="weight on bc loss")
+parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
 parser.add_argument("--outer_loss_decay", type=float,
                     default=0.1, help="0. = just take final loss. 1.=sum all")
 parser.add_argument(
-    "--bc_scale", type=float, default=2e-1, help="scale on random uniform bc"
+    "--bc_scale", type=float, default=1., help="scale on random uniform bc"
 )
-parser.add_argument("--pde", type=str, default="poisson", help="which PDE")
+parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="maml_default")
-parser.add_argument("--viz_every", type=int, default=1000, help="plot every N steps")
+parser.add_argument("--viz_every", type=int, default=250, help="plot every N steps")
 parser.add_argument(
     "--fixed_num_pdes",
     type=int,
@@ -178,7 +178,8 @@ if __name__ == "__main__":
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-    optimizer = flax.optim.Adam(learning_rate=args.outer_lr).create(
+    optimizer = flax.optim.Adam(learning_rate=args.outer_lr,
+                                beta2=0.98).create(
         flax.nn.Model(Field, init_params)
     )
 
@@ -237,8 +238,14 @@ if __name__ == "__main__":
             maml_def.inner_steps,
             maml_def,
         )
+        # this is testing if just not comparing pressures will help
+        # todo(alex): put this everywhere or remove it
+        gt = ground_truth_vals.reshape(coefs.shape)
+        if coefs.shape[2] > 2:
+            coefs = coefs[:, :, :2]
+            gt = gt[:, :, :2]
 
-        return np.sqrt(np.mean((coefs - ground_truth_vals.reshape(coefs.shape)) ** 2))
+        return np.sqrt(np.mean((coefs - gt) ** 2))
 
     @jax.jit
     def validation_losses(model_and_lrs, maml_def=maml_def):
