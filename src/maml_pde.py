@@ -43,7 +43,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
 parser.add_argument("--inner_lr", type=float, default=3e-5, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=1e-5, help="outer learning rate")
+parser.add_argument("--outer_lr", type=float, default=1e-3, help="outer learning rate")
 parser.add_argument(
     "--lr_inner_lr", type=float, default=3e-1, help="lr for inner learning rate"
 )
@@ -241,7 +241,7 @@ if __name__ == "__main__":
         # this is testing if just not comparing pressures will help
         # todo(alex): put this everywhere or remove it
         gt = ground_truth_vals.reshape(coefs.shape)
-        if coefs.shape[2] > 2:
+        if len(coefs.shape) > 2 and coefs.shape[2] > 2:
             coefs = coefs[:, :, :2]
             gt = gt[:, :, :2]
 

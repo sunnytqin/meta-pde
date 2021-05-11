@@ -163,7 +163,7 @@ def sample_params(key, args):
         k2, minval=-1.0, maxval=1.0, shape=(1,)
     )
 
-    n_holes = jax.random.randint(k3, shape=(1,), minval=1, maxval=MAX_HOLES + 1)[0]
+    n_holes = jax.random.randint(k3, shape=(1,), minval=np.array([1]), maxval=np.array([MAX_HOLES + 1]))[0]
 
     pore_shapes = jax.random.uniform(k4, minval=-0.2, maxval=0.2, shape=(MAX_HOLES, 2,))
 

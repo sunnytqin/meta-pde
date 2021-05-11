@@ -60,7 +60,7 @@ parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--siren", type=int, default=0, help="1=true.")
+parser.add_argument("--siren", type=int, default=1, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
 parser.add_argument(
@@ -200,7 +200,7 @@ if __name__ == "__main__":
 
         # this is testing if just not comparing pressures will help
         # todo(alex): put this everywhere or remove it
-        if coefs.shape[2] > 2:
+        if len(coefs.shape) > 2 and coefs.shape[2] > 2:
             coefs = coefs[:, :, :2]
             gt = gt[:, :, :2]
 
@@ -254,6 +254,7 @@ if __name__ == "__main__":
                     tflogger.log_plots("Points", [plt.gcf()], step)
                     _all_points = np.concatenate(_points)
                     _vals = optimizer.target(_all_points)
+                    _vals = _vals.reshape((_vals.shape[0], -1))
                     _boundary_losses, _domain_losses = jax.vmap(
                         lambda x: pde.loss_fn(
                             optimizer.target,
