@@ -69,7 +69,10 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     mesh = mshr.generate_mesh(domain, resolution)
 
     def inlet(x, on_boundary):
-        return on_boundary and (fa.near(x[0], XMIN) or fa.near(x[0], XMAX))
+        return on_boundary and fa.near(x[0], XMIN)
+
+    def outlet(x, on_boundary):
+        return on_boundary and fa.near(x[0], XMAX)
 
     def walls(x, on_boundary):
         return on_boundary
@@ -85,7 +88,17 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     du_p = fa.TrialFunction(W)
 
     # Define function for setting Dirichlet values
-    bc_in_out = fa.DirichletBC(V, fa.Constant((float(bc_params[0]), 0.0)), inlet)
+    lhs_expr = fa.Expression(('A*sin(pi*(x[1]-YMIN)/(YMAX-YMIN))', 0.),
+                            A=float(bc_params[0]),
+                            YMAX=YMAX,
+                            YMIN=YMIN,
+                            element=V.ufl_element())
+    lhs_u = fa.project(lhs_expr, fa.VectorFunctionSpace(mesh, 'P', 2))
+    #fa.plot(lhs_u)
+    #plt.show()
+    #pdb.set_trace()
+    bc_in = fa.DirichletBC(V, lhs_u, inlet)
+    bc_out = fa.DirichletBC(Q, fa.Constant((0.)), outlet)
     bc_walls = fa.DirichletBC(V, fa.Constant((0.0, 0.0)), walls)
     # bc_pressure = fa.DirichletBC(Q, fa.Constant((1.)), inlet)
 
@@ -103,7 +116,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     fa.solve(
         F == 0,
         u_p,
-        [bc_walls, bc_in_out],
+        [bc_walls, bc_in, bc_out],
         solver_parameters={
             "newton_solver": {
                 "maximum_iterations": int(1000),
@@ -146,7 +159,6 @@ if __name__ == "__main__":
     x = np.array(u_p.function_space().tabulate_dof_coordinates()[:100])
 
     points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
-    points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
 
     plot_solution(u_p, params)
     plt.show()
@@ -208,8 +220,8 @@ if __name__ == "__main__":
         V,
         color=speed / speed.max(),
         start_points=seed_points,
-        density=100,
-        linewidth=0.3,
+        density=10,
+        linewidth=0.2,
         arrowsize=0.0,
     )  # , np.sqrt(U**2+V**2))
     # plt.scatter(X_[in_hole], Y_[in_hole], c='gray', s=0.1)
@@ -220,7 +232,7 @@ if __name__ == "__main__":
     fa.plot(u_p.function_space().mesh())
 
     plt.figure(figsize=(9, 3))
-    points_inlet, points_wall, points_pores, points_domain, = sample_points(
+    points_inlet, points_outlet, points_wall, points_pores, points_domain, = sample_points(
         jax.random.PRNGKey(args.seed + 1), 1024, params
     )
 
@@ -228,6 +240,7 @@ if __name__ == "__main__":
 
     plt.scatter(points_wall[:, 0], points_wall[:, 1], color="g", alpha=0.5)
     plt.scatter(points_inlet[:, 0], points_inlet[:, 1], color="r", alpha=0.5)
+    plt.scatter(points_outlet[:, 0], points_outlet[:, 1], color="y", alpha=0.5)
 
     plt.scatter(points_domain[:, 0], points_domain[:, 1], color="b", alpha=0.5)
 

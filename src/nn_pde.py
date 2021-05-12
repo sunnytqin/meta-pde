@@ -6,6 +6,10 @@ import jax.numpy as np
 import numpy as npo
 from jax import grad, jit, vmap
 
+import flaxOptimizers
+from adahessianJax.flaxOptimizer import Adahessian
+from adahessianJax import grad_and_hessian
+
 from jax.experimental import optimizers
 
 from .util.tensorboard_logger import Logger as TFLogger
@@ -39,7 +43,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--bsize", type=int, default=1, help="batch size (in tasks)")
 parser.add_argument("--n_eval", type=int, default=2, help="num eval tasks")
-parser.add_argument("--outer_lr", type=float, default=1e-5, help="outer learning rate")
+parser.add_argument("--outer_lr", type=float, default=1e-4, help="outer learning rate")
 parser.add_argument(
     "--outer_points",
     type=int,
@@ -49,7 +53,7 @@ parser.add_argument(
 parser.add_argument(
     "--validation_points",
     type=int,
-    default=2048,
+    default=1024,
     help="num points in domain for validation",
 )
 parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
@@ -61,17 +65,23 @@ parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument("--siren", type=int, default=1, help="1=true.")
+
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
+parser.add_argument("--grad_clip", type=float, default=None, help="max grad for clipping")
+
 parser.add_argument(
     "--bc_scale", type=float, default=1., help="scale on random uniform bc"
 )
 parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
+
+parser.add_argument("--optimizer", type=str, default="adam", help="adam or ranger")
+
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="nn_default")
 parser.add_argument("--viz_every", type=int, default=100, help="plot every N steps")
 
-parser.add_argument("--val_every", type=int, default=25, help="validate every N steps")
+parser.add_argument("--val_every", type=int, default=1, help="validate every N steps")
 
 parser.add_argument("--measure_grad_norm_every", type=int, default=100, help="plot every N steps")
 
@@ -172,9 +182,21 @@ if __name__ == "__main__":
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-    optimizer = flax.optim.Adam(learning_rate=args.outer_lr, beta2=0.98).create(
-        flax.nn.Model(Field, init_params)
-    )
+    if args.optimizer == 'adam':
+        optimizer = flax.optim.Adam(learning_rate=args.outer_lr, beta2=0.98).create(
+            flax.nn.Model(Field, init_params)
+        )
+    elif args.optimizer == 'ranger':
+        optimizer = flaxOptimizers.Ranger(learning_rate=args.outer_lr, beta2=0.98,
+                                          use_gc=False).create(
+            flax.nn.Model(Field, init_params)
+        )
+    elif args.optimizer == 'adahessian':
+      optimizer = Adahessian(learning_rate=args.outer_lr, beta2=0.95).create(
+          flax.nn.Model(Field, init_params)
+      )
+    else:
+        raise Exception("unknown optimizer: ", args.optimizer)
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -200,15 +222,12 @@ if __name__ == "__main__":
         coefs = vmap(make_coef_func, (0, None, 0, 0))(
             keys, model, ground_truth_params, points,
         )
-        gt = ground_truth_vals.reshape(coefs.shape)
+        coefs = coefs.reshape(coefs.shape[0], -1)
+        ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
+        err = coefs - ground_truth_vals
+        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=0, keepdims=True)
 
-        # this is testing if just not comparing pressures will help
-        # todo(alex): put this everywhere or remove it
-        if len(coefs.shape) > 2 and coefs.shape[2] > 2:
-            coefs = coefs[:, :, :2]
-            gt = gt[:, :, :2]
-
-        return np.sqrt(np.mean((coefs - gt) ** 2))
+        return np.sqrt(np.mean(rel_sq_err))
 
     @jax.jit
     def validation_losses(model):
@@ -238,9 +257,16 @@ if __name__ == "__main__":
     for step in range(args.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
-            (loss, loss_aux), batch_grad = jax.value_and_grad(
-                batch_loss_fn, argnums=1, has_aux=True
-            )(subkey, optimizer.target)
+            if args.optimizer == 'adahessian':
+                k1, k2 = jax.random.split(subkey)
+                loss, loss_aux = batch_loss_fn(k1, optimizer.target)
+                batch_grad, batch_hess = grad_and_hessian(
+                    lambda model: batch_loss_fn(subkey, model)[0],
+                    (optimizer.target,), k2)
+            else:
+                (loss, loss_aux), batch_grad = jax.value_and_grad(
+                    batch_loss_fn, argnums=1, has_aux=True
+                )(subkey, optimizer.target)
 
             # ---- This big section is logging a bunch of debug stats
             # loss grad norms; plotting the sampled points; plotting the vals at those
@@ -292,11 +318,6 @@ if __name__ == "__main__":
                         plt.colorbar(clrs)
                         tflogger.log_plots("Outputs dim {}".format(dim), [plt.gcf()], step)
 
-            if step < 250:
-                batch_grad = jax.tree_util.tree_map(
-                    lambda x: x * (step+1) / 250,
-                    batch_grad
-                )
             grad_norm = np.sqrt(
                 jax.tree_util.tree_reduce(
                     lambda x, y: x + y,
@@ -304,12 +325,16 @@ if __name__ == "__main__":
                 )
             )
             if np.isfinite(grad_norm):
-                if grad_norm > min([100.0, step]):
-                    log("clipping gradients with norm {}".format(grad_norm))
-                    batch_grad = jax.tree_util.tree_map(
-                        lambda x: x / grad_norm, batch_grad
-                    )
-                optimizer = optimizer.apply_gradient(batch_grad)
+                if args.optimizer == 'adahessian':
+                    optimizer = optimizer.apply_gradient(batch_grad, batch_hess)
+
+                else:
+                    if args.grad_clip is not None and grad_norm > args.grad_clip:
+                        log("clipping gradients with norm {}".format(grad_norm))
+                        batch_grad = jax.tree_util.tree_map(
+                            lambda x: args.grad_clip*x / grad_norm, batch_grad
+                        )
+                    optimizer = optimizer.apply_gradient(batch_grad)
             else:
                 log("NaN grad!")
 

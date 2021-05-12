@@ -113,9 +113,12 @@ def loss_stress_fn(field_fn, points_in_domain, params):
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):
     source_params, bc_params, per_hole_params, n_holes = params
+    sinusoidal_magnitude = np.sin(
+        np.pi*(points_on_inlet[:, 1]-YMIN)/(YMAX-YMIN)).reshape(-1, 1)
+
     return (
             field_fn(points_on_inlet)[:, :-1]
-            - bc_params[0] * np.ones_like(points_on_inlet) *
+            - bc_params[0] * sinusoidal_magnitude *
             np.array([1., 0.]).reshape(1, 2)
         )** 2
 
@@ -125,13 +128,18 @@ def loss_noslip_fn(field_fn, points_noslip, params):
 
 
 def loss_fn(field_fn, points, params):
-    points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
+    (points_on_inlet,
+     points_on_outlet,
+     points_on_walls,
+     points_on_holes,
+     points_in_domain) = points
     points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
-    p_in_domain = get_p(field_fn)(points_in_domain)
+    p_outlet = get_p(field_fn)(points_on_outlet)
     return (
         {"loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
-         "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params))},
+         "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params)),
+         "loss_p_outlet": np.mean(p_outlet**2)},
         {
             "loss_stress": np.mean(
                 loss_stress_fn(field_fn, points_in_domain, params)),
@@ -198,31 +206,36 @@ def is_in_hole(xy, pore_params, tol=1e-7):
 @partial(jax.jit, static_argnums=(1,))
 def sample_points(key, n, params):
     _, _, per_hole_params, n_holes = params
-    k1, k2, k3, k4 = jax.random.split(key, 4)
+    k1, k2, k3, k4, k5 = jax.random.split(key, 5)
     ratio = (XMAX - XMIN) / (YMAX - YMIN)
-    n_on_inlet = int((n / 2) / (1 + 2 * ratio))
-    n_on_walls = n // 2 - n_on_inlet
-    n_on_holes = n - n_on_walls - n_on_inlet
+    n_on_inlet = n // 12
+    n_on_outlet = n_on_inlet
+    n_on_walls = n // 6
+    n_on_holes = n // 2 - n_on_walls - n_on_inlet - n_on_outlet
     points_on_inlet = sample_points_on_inlet(k1, n_on_inlet, params)
-    points_on_walls = sample_points_on_walls(k2, n_on_walls, params)
-    points_on_holes = sample_points_on_pores(k3, n_on_holes, params)
-    points_in_domain = sample_points_in_domain(k4, n, params)
-    return points_on_inlet, points_on_walls, points_on_holes, points_in_domain
+    points_on_outlet = sample_points_on_outlet(k2, n_on_outlet, params)
+    points_on_walls = sample_points_on_walls(k3, n_on_walls, params)
+    points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
+    points_in_domain = sample_points_in_domain(k5, n, params)
+    return (points_on_inlet,
+            points_on_outlet,
+            points_on_walls,
+            points_on_holes,
+            points_in_domain)
 
 
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_on_inlet(key, n, params):
     _, _, per_hole_params, n_holes = params
-    k1, k2 = jax.random.split(key)
     lhs_y = np.linspace(YMIN, YMAX, n, endpoint=False) + jax.random.uniform(
-        k1, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
-    )
-    rhs_y = np.linspace(YMAX, YMIN, n, endpoint=False) + jax.random.uniform(
-        k2, minval=-(YMAX - YMIN)/ n, maxval=0., shape=(1,)
+        key, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
     )
     lhs = np.stack([XMIN * np.ones(n), lhs_y], axis=1)
-    rhs = np.stack([XMAX * np.ones(n), rhs_y], axis=1)
-    return np.concatenate([lhs, rhs])
+    return lhs
+
+
+def sample_points_on_outlet(key, n, params):
+    return sample_points_on_inlet(key, n, params) + np.array([[XMAX-XMIN, 0.]])
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -493,8 +506,8 @@ def plot_solution(u_p, params):
         V,
         color=speed / speed.max(),
         start_points=seed_points,
-        density=100,
-        linewidth=0.3,
+        density=10,
+        linewidth=0.2,
         arrowsize=0.0,
     )  # , np.sqrt(U**2+V**2))
 
@@ -508,10 +521,11 @@ if __name__ == '__main__':
     for i in range(1, 10):
         key, subkey = jax.random.split(key)
         points = sample_points(subkey, 512, params)
-        points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
+        points_on_inlet, points_on_outlet, points_on_walls, points_on_holes, points_in_domain = points
         plt.figure()
         plt.subplot(1,1,1)
         plt.scatter(points_on_inlet[:, 0], points_on_inlet[:, 1], label="points on inlet")
+        plt.scatter(points_on_outlet[:, 0], points_on_outlet[:, 1], label="points on outlet")
         plt.scatter(points_on_walls[:, 0], points_on_walls[:, 1], label="points on walls")
         plt.xlabel('X')
         plt.ylabel('Y')

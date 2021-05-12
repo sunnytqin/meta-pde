@@ -69,10 +69,14 @@ parser.add_argument("--bc_weight", type=float, default=3e1, help="weight on bc l
 parser.add_argument(
     "--bc_scale", type=float, default=2e-1, help="scale on random uniform bc"
 )
-parser.add_argument("--pde", type=str, default="nonlinear_stokes", help="which PDE")
+parser.add_argument("--grad_clip", type=float, default=None, help="max grad for clipping")
+
+parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="leap_default")
 parser.add_argument("--viz_every", type=int, default=1000, help="plot every N steps")
+parser.add_argument("--val_every", type=int, default=25, help="validate every N steps")
+
 parser.add_argument(
     "--fixed_num_pdes",
     type=int,
@@ -206,8 +210,12 @@ if __name__ == "__main__":
             leap_def.inner_steps,
             leap_def,
         )
+        coefs = coefs.reshape(coefs.shape[0], -1)
+        ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
+        err = coefs - ground_truth_vals
+        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=0, keepdims=True)
 
-        return np.sqrt(np.mean((coefs - ground_truth_vals.reshape(coefs.shape)) ** 2))
+        return np.sqrt(np.mean(rel_sq_err))
 
     @jax.jit
     def validation_losses(model, leap_def=leap_def):
@@ -244,20 +252,20 @@ if __name__ == "__main__":
                 )
             )
             if np.isfinite(meta_grad_norm):
-                if meta_grad_norm > min([100.0, step]):
+                if args.grad_clip is not None and meta_grad_norm > args.grad_clip:
                     log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad = jax.tree_util.tree_map(
-                        lambda x: x / meta_grad_norm, meta_grad
+                        lambda x: args.grad_clip*x / meta_grad_norm, meta_grad
                     )
                 optimizer = optimizer.apply_gradient(meta_grad)
             else:
                 log("NaN grad!")
+        if step % args.val_every == 0:
+            val_error = vmap_validation_error(
+                optimizer.target, gt_params, coords, fenics_vals,
+            )
 
-        val_error = vmap_validation_error(
-            optimizer.target, gt_params, coords, fenics_vals,
-        )
-
-        val_losses = validation_losses(optimizer.target)
+            val_losses = validation_losses(optimizer.target)
 
         log(
             "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "

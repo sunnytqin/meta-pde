@@ -65,6 +65,8 @@ parser.add_argument(
     default=512,
     help="num points in domain for validation",
 )
+parser.add_argument("--grad_clip", type=float, default=None, help="max grad for clipping")
+
 parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e6), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
@@ -85,6 +87,8 @@ parser.add_argument(
 parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="maml_default")
+parser.add_argument("--val_every", type=int, default=25, help="validate every N steps")
+
 parser.add_argument("--viz_every", type=int, default=250, help="plot every N steps")
 parser.add_argument(
     "--fixed_num_pdes",
@@ -238,14 +242,12 @@ if __name__ == "__main__":
             maml_def.inner_steps,
             maml_def,
         )
-        # this is testing if just not comparing pressures will help
-        # todo(alex): put this everywhere or remove it
-        gt = ground_truth_vals.reshape(coefs.shape)
-        if len(coefs.shape) > 2 and coefs.shape[2] > 2:
-            coefs = coefs[:, :, :2]
-            gt = gt[:, :, :2]
+        coefs = coefs.reshape(coefs.shape[0], -1)
+        ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
+        err = coefs - ground_truth_vals
+        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=0, keepdims=True)
 
-        return np.sqrt(np.mean((coefs - gt) ** 2))
+        return np.sqrt(np.mean(rel_sq_err))
 
     @jax.jit
     def validation_losses(model_and_lrs, maml_def=maml_def):
@@ -281,25 +283,26 @@ if __name__ == "__main__":
             meta_grad_norm = np.sqrt(
                 jax.tree_util.tree_reduce(
                     lambda x, y: x + y,
-                    jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad),
+                    jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad[0]),
                 )
             )
             if np.isfinite(meta_grad_norm):
-                if meta_grad_norm > min([100.0, step]):
+                if args.grad_clip is not None and meta_grad_norm > args.grad_clip:
                     log("clipping gradients with norm {}".format(meta_grad_norm))
-                    meta_grad = jax.tree_util.tree_map(
-                        lambda x: x / meta_grad_norm, meta_grad
+                    meta_grad[0] = jax.tree_util.tree_map(
+                        lambda x: args.grad_clip*x / meta_grad_norm, meta_grad[0]
                     )
                 optimizer = optimizer.apply_gradient(meta_grad[0])
                 inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
             else:
                 log("NaN grad!")
 
-        val_error = vmap_validation_error(
-            (optimizer.target, inner_lrs), gt_params, coords, fenics_vals,
-        )
+        if step % args.val_every == 0:
+            val_error = vmap_validation_error(
+                (optimizer.target, inner_lrs), gt_params, coords, fenics_vals,
+            )
 
-        val_losses, val_meta_losses = validation_losses((optimizer.target, inner_lrs))
+            val_losses, val_meta_losses = validation_losses((optimizer.target, inner_lrs))
 
         log(
             "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
