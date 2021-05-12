@@ -121,7 +121,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     )
 
     # Enforce zero mean pressure
-    u1, p1 = fa.split(fa.interpolate(fa.Constant((1., 1., 1.)), W))
+    u1, p1 = fa.split(fa.interpolate(fa.Constant((1.0, 1.0, 1.0)), W))
 
     mean_pressure = fa.assemble(p * fa.dx) / fa.assemble(p1 * fa.dx)
 

@@ -65,7 +65,9 @@ parser.add_argument(
     default=512,
     help="num points in domain for validation",
 )
-parser.add_argument("--grad_clip", type=float, default=None, help="max grad for clipping")
+parser.add_argument(
+    "--grad_clip", type=float, default=None, help="max grad for clipping"
+)
 
 parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e6), help="num outer steps")
@@ -74,15 +76,23 @@ parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
-                    "minimize the rmse instead of the mse")
+parser.add_argument(
+    "--sqrt_loss",
+    type=int,
+    default=0,
+    help="1=true. if true, " "minimize the rmse instead of the mse",
+)
 parser.add_argument("--siren", type=int, default=1, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
-parser.add_argument("--outer_loss_decay", type=float,
-                    default=0.1, help="0. = just take final loss. 1.=sum all")
 parser.add_argument(
-    "--bc_scale", type=float, default=1., help="scale on random uniform bc"
+    "--outer_loss_decay",
+    type=float,
+    default=0.1,
+    help="0. = just take final loss. 1.=sum all",
+)
+parser.add_argument(
+    "--bc_scale", type=float, default=1.0, help="scale on random uniform bc"
 )
 parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
@@ -182,8 +192,7 @@ if __name__ == "__main__":
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-    optimizer = flax.optim.Adam(learning_rate=args.outer_lr,
-                                beta2=0.98).create(
+    optimizer = flax.optim.Adam(learning_rate=args.outer_lr, beta2=0.98).create(
         flax.nn.Model(Field, init_params)
     )
 
@@ -245,7 +254,7 @@ if __name__ == "__main__":
         coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
         err = coefs - ground_truth_vals
-        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=1, keepdims=True)
+        rel_sq_err = err ** 2 / np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
 
         return np.sqrt(np.mean(rel_sq_err)), np.sqrt(np.mean(rel_sq_err, axis=(0, 1)))
 
@@ -290,7 +299,7 @@ if __name__ == "__main__":
                 if args.grad_clip is not None and meta_grad_norm > args.grad_clip:
                     log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad[0] = jax.tree_util.tree_map(
-                        lambda x: args.grad_clip*x / meta_grad_norm, meta_grad[0]
+                        lambda x: args.grad_clip * x / meta_grad_norm, meta_grad[0]
                     )
                 optimizer = optimizer.apply_gradient(meta_grad[0])
                 inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
@@ -338,8 +347,9 @@ if __name__ == "__main__":
                     "meta_" + k, float(np.mean(meta_losses[1][k])), step
                 )
             for i in range(len(per_dim_val_error)):
-                tflogger.log_scalar("val_error_dim_{}".format(i),
-                                    float(per_dim_val_error[i]), step)
+                tflogger.log_scalar(
+                    "val_error_dim_{}".format(i), float(per_dim_val_error[i]), step
+                )
             for inner_step in range(args.inner_steps + 1):
                 tflogger.log_scalar(
                     "loss_step_{}".format(inner_step),
@@ -402,8 +412,6 @@ if __name__ == "__main__":
 
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
-
-
 
     if args.expt_name is not None:
         outfile.close()

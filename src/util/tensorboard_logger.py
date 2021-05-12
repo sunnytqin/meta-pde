@@ -58,7 +58,7 @@ class Logger(object):
             # height = int(height)
             # Create an Image object
             images.append(s)
-        plt.close('all')
+        plt.close("all")
 
         self.log_images(tag, images, step)
 

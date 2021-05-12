@@ -31,7 +31,6 @@ from ..util import jax_tools
 from ..util.timer import Timer
 
 
-
 def file_cleanup(filepath):
     """
     Remove directory specified by filepath
@@ -39,9 +38,10 @@ def file_cleanup(filepath):
     if os.path.exists(filepath):
         rmtree(filepath)
         os.mkdir(filepath)
-        print('Deleted previously generated files and made new directory')
+        print("Deleted previously generated files and made new directory")
 
-def generate_hparam(expt_number = 0, **kwargs):
+
+def generate_hparam(expt_number=0, **kwargs):
     """
     Randomly generate hparameters according to the instructions given by 'hparam_config.yml'
     Args:
@@ -55,33 +55,40 @@ def generate_hparam(expt_number = 0, **kwargs):
     for arg, arg_val in zip(kwargs, kwargs.values()):
         # generate parameters
         if type(arg_val) == dict:
-            if arg_val['distribution'] == 'uniform':
-                arg_paras = npo.random.uniform(low=arg_val['low_bound'], high=arg_val['up_bound'])
-            elif arg_val['distribution'] == 'log':
-                arg_paras = npo.power(10,
-                                     npo.random.uniform(low=arg_val['low_bound'], high=arg_val['up_bound']))
-            elif arg_val['distribution'] == 'binary':
+            if arg_val["distribution"] == "uniform":
+                arg_paras = npo.random.uniform(
+                    low=arg_val["low_bound"], high=arg_val["up_bound"]
+                )
+            elif arg_val["distribution"] == "log":
+                arg_paras = npo.power(
+                    10,
+                    npo.random.uniform(
+                        low=arg_val["low_bound"], high=arg_val["up_bound"]
+                    ),
+                )
+            elif arg_val["distribution"] == "binary":
                 arg_paras = npo.random.randint(2)
             else:
-                raise Exception('unknown distribution')
+                raise Exception("unknown distribution")
 
-            if arg_val['dtype'] == 'int':
+            if arg_val["dtype"] == "int":
                 arg_paras = int(arg_paras)
-            elif arg_val['dtype'] == 'float':
+            elif arg_val["dtype"] == "float":
                 arg_paras = float(arg_paras)
             else:
-                raise Exception('unkown dtype')
+                raise Exception("unkown dtype")
 
         else:
-            if arg_val == 'None':
+            if arg_val == "None":
                 arg_paras = None
             else:
                 arg_paras = arg_val
         # add expt_name
-        arg_dict['expt_name'] = 'expt_' + str(expt_number)
+        arg_dict["expt_name"] = "expt_" + str(expt_number)
         arg_dict[arg] = arg_paras
 
     return arg_dict
+
 
 def maml_main(args):
     # make into a hashable, immutable namedtuple
@@ -109,19 +116,20 @@ def maml_main(args):
         outfile = open(os.path.join(path, "log.txt"), "w")
 
         def log(*args, **kwargs):
-            #print(*args, **kwargs, flush=True)
+            # print(*args, **kwargs, flush=True)
             print(*args, **kwargs, file=outfile, flush=True)
 
         tflogger = TFLogger(path)
 
-        with open(os.path.join(path, 'conf.yaml'), 'w') as yamlout:
+        with open(os.path.join(path, "conf.yaml"), "w") as yamlout:
             yaml.dump(args._asdict(), yamlout, default_flow_style=False)
 
         def log_num(*args):
-            basic_str = ', '.join(map(str, args))
+            basic_str = ", ".join(map(str, args))
             log(basic_str)
 
     else:
+
         def log(*args, **kwargs):
             print(*args, **kwargs, flush=True)
 
@@ -129,8 +137,10 @@ def maml_main(args):
 
     print("Beginning Process with pid: {}".format(os.getpid()))
 
-    log("step,meta_loss,val_meta_loss,val_err,meta_grad_norm,"\
-        "time,meta_loss_max,meta_loss_min,meta_loss_std")
+    log(
+        "step,meta_loss,val_meta_loss,val_err,meta_grad_norm,"
+        "time,meta_loss_max,meta_loss_min,meta_loss_std"
+    )
     # --------------------- Defining the meta-training algorithm --------------------
 
     def loss_fn(field_fn, points, params):
@@ -267,7 +277,6 @@ def maml_main(args):
 
         inner_lrs = inner_lr_get(inner_lr_state)
 
-
         with Timer() as t:
             meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
                 maml_def, subkey, optimizer.target, inner_lrs,
@@ -280,7 +289,7 @@ def maml_main(args):
             )
             if np.isfinite(meta_grad_norm):
                 if meta_grad_norm > min([100.0, step]):
-                    #log("clipping gradients with norm {}".format(meta_grad_norm))
+                    # log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad = jax.tree_util.tree_map(
                         lambda x: x / meta_grad_norm, meta_grad
                     )
@@ -295,8 +304,17 @@ def maml_main(args):
 
         val_losses, val_meta_losses = validation_losses((optimizer.target, inner_lrs))
 
-        log_num(step, np.mean(meta_losses[0]), np.mean(val_meta_losses[0]), val_error, meta_grad_norm,
-            t.interval, np.max(meta_losses[0]), np.min(meta_losses[0]), np.std(meta_losses[0]))
+        log_num(
+            step,
+            np.mean(meta_losses[0]),
+            np.mean(val_meta_losses[0]),
+            val_error,
+            meta_grad_norm,
+            t.interval,
+            np.max(meta_losses[0]),
+            np.min(meta_losses[0]),
+            np.std(meta_losses[0]),
+        )
 
         if tflogger is not None:
             tflogger.log_histogram("batch_meta_losses", meta_losses[0], step)
@@ -365,7 +383,7 @@ def maml_main(args):
                     args.inner_steps,
                 )
             except:
-                print(str(os.getpid()) + ' compare_plots_with_ground_truth failed')
+                print(str(os.getpid()) + " compare_plots_with_ground_truth failed")
 
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
@@ -390,19 +408,20 @@ def maml_main(args):
         else:
             plt.show()
     except:
-        print(str(os.getpid()) + ' compare_plots_with_ground_truth failed')
+        print(str(os.getpid()) + " compare_plots_with_ground_truth failed")
 
     print("Process with pid: {} completed".format(os.getpid()))
 
     if args.expt_name is not None:
         outfile.close()
 
-if __name__ == '__main__':
-    filepath = 'src/hparam/maml_poisson_tuning'
+
+if __name__ == "__main__":
+    filepath = "src/hparam/maml_poisson_tuning"
     file_cleanup(filepath)
 
     # read config file
-    with open('src/hparam/hparam_config.yml', 'rb') as f:
+    with open("src/hparam/hparam_config.yml", "rb") as f:
         conf = yaml.load(f.read(), Loader=Loader)
 
     with Pool(2) as p:

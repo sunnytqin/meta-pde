@@ -26,6 +26,8 @@ XMAX = 1.0
 YMIN = -1.0
 YMAX = 1.0
 
+PRESSURE_FACTOR = 10.0
+
 MAX_HOLES = 3
 
 MAX_SIZE = 0.6
@@ -89,12 +91,9 @@ def deviatoric_stress(x, field_fn, source_params):
 def loss_divu_fn(field_fn, points_in_domain, params):
     # force div(u) = 0
     source_params, bc_params, per_hole_params, n_holes = params
-    div_u = vmap_divergence(
-        points_in_domain,
-        get_u(field_fn),
-    )
+    div_u = vmap_divergence(points_in_domain, get_u(field_fn),)
 
-    return div_u**2
+    return div_u ** 2
 
 
 def loss_stress_fn(field_fn, points_in_domain, params):
@@ -103,24 +102,25 @@ def loss_stress_fn(field_fn, points_in_domain, params):
 
     gradu_fn = jax.jacfwd(get_u(field_fn))
 
-    gradu_plus_p_fn = lambda x: gradu_fn(x) + get_p(field_fn)(x)*np.eye(2)
+    gradu_plus_p_fn = lambda x: gradu_fn(x) + PRESSURE_FACTOR * get_p(field_fn)(
+        x
+    ) * np.eye(2)
 
-    div_gradu_plus_p = vmap_divergence_tensor(
-        points_in_domain, gradu_plus_p_fn
-    )
-    return np.mean(div_gradu_plus_p**2, axis=1)
+    div_gradu_plus_p = vmap_divergence_tensor(points_in_domain, gradu_plus_p_fn)
+    return (1.0 / PRESSURE_FACTOR) * np.mean(div_gradu_plus_p ** 2, axis=1)
 
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):
     source_params, bc_params, per_hole_params, n_holes = params
     sinusoidal_magnitude = np.sin(
-        np.pi*(points_on_inlet[:, 1]-YMIN)/(YMAX-YMIN)).reshape(-1, 1)
+        np.pi * (points_on_inlet[:, 1] - YMIN) / (YMAX - YMIN)
+    ).reshape(-1, 1)
 
     return (
-            field_fn(points_on_inlet)[:, :-1]
-            - bc_params[0] * sinusoidal_magnitude *
-            np.array([1., 0.]).reshape(1, 2)
-        )** 2
+        field_fn(points_on_inlet)[:, :-1]
+        - bc_params[0] * sinusoidal_magnitude * np.array([1.0, 0.0]).reshape(1, 2)
+    ) ** 2
+
 
 def loss_noslip_fn(field_fn, points_noslip, params):
     source_params, bc_params, per_hole_params, n_holes = params
@@ -128,23 +128,25 @@ def loss_noslip_fn(field_fn, points_noslip, params):
 
 
 def loss_fn(field_fn, points, params):
-    (points_on_inlet,
-     points_on_outlet,
-     points_on_walls,
-     points_on_holes,
-     points_in_domain) = points
+    (
+        points_on_inlet,
+        points_on_outlet,
+        points_on_walls,
+        points_on_holes,
+        points_in_domain,
+    ) = points
     points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
     p_outlet = get_p(field_fn)(points_on_outlet)
     return (
-        {"loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
-         "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params)),
-         "loss_p_outlet": np.mean(p_outlet**2)},
         {
-            "loss_stress": np.mean(
-                loss_stress_fn(field_fn, points_in_domain, params)),
-            "loss_divu": np.mean(
-                loss_divu_fn(field_fn, points_in_domain, params))
+            "loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
+            "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params)),
+            "loss_p_outlet": np.mean(p_outlet ** 2),
+        },
+        {
+            "loss_stress": np.mean(loss_stress_fn(field_fn, points_in_domain, params)),
+            "loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
         },
     )
 
@@ -152,9 +154,12 @@ def loss_fn(field_fn, points, params):
 @partial(jax.jit, static_argnums=(1,))
 def sample_params(key, args):
 
-    if hasattr(args, 'fixed_num_pdes') and args.fixed_num_pdes is not None:
-        key = jax.random.PRNGKey(jax.random.randint(key, (1,), np.array([0]),
-                                                    np.array([args.fixed_num_pdes]))[0])
+    if hasattr(args, "fixed_num_pdes") and args.fixed_num_pdes is not None:
+        key = jax.random.PRNGKey(
+            jax.random.randint(
+                key, (1,), np.array([0]), np.array([args.fixed_num_pdes])
+            )[0]
+        )
 
     k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
 
@@ -172,7 +177,9 @@ def sample_params(key, args):
         k2, minval=-1.0, maxval=1.0, shape=(1,)
     )
 
-    n_holes = jax.random.randint(k3, shape=(1,), minval=np.array([1]), maxval=np.array([MAX_HOLES + 1]))[0]
+    n_holes = jax.random.randint(
+        k3, shape=(1,), minval=np.array([1]), maxval=np.array([MAX_HOLES + 1])
+    )[0]
 
     pore_shapes = jax.random.uniform(k4, minval=-0.2, maxval=0.2, shape=(MAX_HOLES, 2,))
 
@@ -182,10 +189,12 @@ def sample_params(key, args):
 
     pore_x0y0 = jax.random.uniform(
         k5,
-        minval=np.array([[XMIN + 1.5*np.max(pore_sizes),
-                          YMIN + 1.5*np.max(pore_sizes)]]),
-        maxval=np.array([[XMAX - 1.5*np.max(pore_sizes),
-                          YMAX - 1.5*np.max(pore_sizes)]]),
+        minval=np.array(
+            [[XMIN + 1.5 * np.max(pore_sizes), YMIN + 1.5 * np.max(pore_sizes)]]
+        ),
+        maxval=np.array(
+            [[XMAX - 1.5 * np.max(pore_sizes), YMAX - 1.5 * np.max(pore_sizes)]]
+        ),
         shape=(MAX_HOLES, 2),
     )
 
@@ -217,11 +226,13 @@ def sample_points(key, n, params):
     points_on_walls = sample_points_on_walls(k3, n_on_walls, params)
     points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
     points_in_domain = sample_points_in_domain(k5, n, params)
-    return (points_on_inlet,
-            points_on_outlet,
-            points_on_walls,
-            points_on_holes,
-            points_in_domain)
+    return (
+        points_on_inlet,
+        points_on_outlet,
+        points_on_walls,
+        points_on_holes,
+        points_in_domain,
+    )
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -235,7 +246,7 @@ def sample_points_on_inlet(key, n, params):
 
 
 def sample_points_on_outlet(key, n, params):
-    return sample_points_on_inlet(key, n, params) + np.array([[XMAX-XMIN, 0.]])
+    return sample_points_on_inlet(key, n, params) + np.array([[XMAX - XMIN, 0.0]])
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -362,12 +373,10 @@ def is_defined(xy, u):
 class SecondOrderTaylorLookup(object):
     def __init__(self, u, x0, d=3):
         x0 = np.array(x0)
-        Vg = fa.TensorFunctionSpace(u.function_space().mesh(), 'P', 2,
-                                    shape=(d, 2))
+        Vg = fa.TensorFunctionSpace(u.function_space().mesh(), "P", 2, shape=(d, 2))
         ug = fa.project(fa.grad(u), Vg, solver_type="mumps")
         ug.set_allow_extrapolation(True)
-        Vh = fa.TensorFunctionSpace(u.function_space().mesh(), 'P', 2,
-                                    shape=(d, 2, 2))
+        Vh = fa.TensorFunctionSpace(u.function_space().mesh(), "P", 2, shape=(d, 2, 2))
         uh = fa.project(fa.grad(ug), Vh, solver_type="mumps")
         uh.set_allow_extrapolation(True)
 
@@ -392,25 +401,27 @@ class SecondOrderTaylorLookup(object):
 @jax.jit
 def single_second_order_taylor_eval(xi, x0i, u0, g0, h0, d=3):
     dx = xi - x0i
-    return u0.reshape(d) + np.matmul(
-        g0.reshape(d, 2), dx.reshape(2, 1)).reshape(d) + np.matmul(
+    return (
+        u0.reshape(d)
+        + np.matmul(g0.reshape(d, 2), dx.reshape(2, 1)).reshape(d)
+        + np.matmul(
             dx.reshape(1, 1, 2), np.matmul(h0.reshape(d, 2, 2), dx.reshape(1, 2, 1))
-        ).reshape(d) / 2.
+        ).reshape(d)
+        / 2.0
+    )
 
 
-def fenics_to_jax(u, gridsize=300, temp=1.):
-    X, Y = np.meshgrid(np.linspace(XMIN, XMAX, 3*gridsize),
-                       np.linspace(YMIN, YMAX, gridsize))
+def fenics_to_jax(u, gridsize=300, temp=1.0):
+    X, Y = np.meshgrid(
+        np.linspace(XMIN, XMAX, 3 * gridsize), np.linspace(YMIN, YMAX, gridsize)
+    )
 
     XY = list(zip(X.reshape(-1), Y.reshape(-1)))
 
-    mask = [is_defined([x, y], u)
-            for x, y in XY]
+    mask = [is_defined([x, y], u) for x, y in XY]
 
     u.set_allow_extrapolation(True)
-    U = [
-        u(x, y) for x, y in XY
-    ]
+    U = [u(x, y) for x, y in XY]
     u.set_allow_extrapolation(False)
     U = np.array(U)
     XY = np.array(XY)
@@ -426,8 +437,9 @@ def fenics_to_jax(u, gridsize=300, temp=1.):
         dists = dists[inds]
         vals = U[inds]
         is_defined_mask = mask[inds]
-        weights = jax.nn.softmax(
-            is_defined_mask * temp / (dists + 1e-14)).reshape(-1, 1)
+        weights = jax.nn.softmax(is_defined_mask * temp / (dists + 1e-14)).reshape(
+            -1, 1
+        )
         return (weights * vals).sum(axis=0).reshape(3)
 
     def maybe_vmapped(x):
@@ -446,7 +458,7 @@ def error_on_coords(fenics_fn, jax_fn, coords=None):
         coords = np.array(fenics_fn.function_space().tabulate_dof_coordinates())
     fenics_vals = np.array([fenics_fn(x) for x in coords])
     jax_vals = jax_fn(coords)
-    return np.mean((fenics_vals-jax_vals)**2)
+    return np.mean((fenics_vals - jax_vals) ** 2)
 
 
 def plot_solution(u_p, params):
@@ -512,7 +524,7 @@ def plot_solution(u_p, params):
     )  # , np.sqrt(U**2+V**2))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = parser.parse_args()
     args = namedtuple("ArgsTuple", vars(args))(**vars(args))
     key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
@@ -521,16 +533,32 @@ if __name__ == '__main__':
     for i in range(1, 10):
         key, subkey = jax.random.split(key)
         points = sample_points(subkey, 512, params)
-        points_on_inlet, points_on_outlet, points_on_walls, points_on_holes, points_in_domain = points
+        (
+            points_on_inlet,
+            points_on_outlet,
+            points_on_walls,
+            points_on_holes,
+            points_in_domain,
+        ) = points
         plt.figure()
-        plt.subplot(1,1,1)
-        plt.scatter(points_on_inlet[:, 0], points_on_inlet[:, 1], label="points on inlet")
-        plt.scatter(points_on_outlet[:, 0], points_on_outlet[:, 1], label="points on outlet")
-        plt.scatter(points_on_walls[:, 0], points_on_walls[:, 1], label="points on walls")
-        plt.xlabel('X')
-        plt.ylabel('Y')
-        plt.scatter(points_on_holes[:, 0], points_on_holes[:, 1], label='points on holes')
-        plt.scatter(points_in_domain[:, 0], points_in_domain[:, 1], label='points in domain')
+        plt.subplot(1, 1, 1)
+        plt.scatter(
+            points_on_inlet[:, 0], points_on_inlet[:, 1], label="points on inlet"
+        )
+        plt.scatter(
+            points_on_outlet[:, 0], points_on_outlet[:, 1], label="points on outlet"
+        )
+        plt.scatter(
+            points_on_walls[:, 0], points_on_walls[:, 1], label="points on walls"
+        )
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.scatter(
+            points_on_holes[:, 0], points_on_holes[:, 1], label="points on holes"
+        )
+        plt.scatter(
+            points_in_domain[:, 0], points_in_domain[:, 1], label="points in domain"
+        )
         plt.legend()
 
         plt.show()

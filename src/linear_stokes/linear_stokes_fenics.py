@@ -26,6 +26,7 @@ from .linear_stokes_common import (
     XMAX,
     YMIN,
     YMAX,
+    PRESSURE_FACTOR,
 )
 
 
@@ -33,7 +34,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--bc_scale", type=float, default=1e1, help="bc scale")
+parser.add_argument("--bc_scale", type=float, default=1e0, help="bc scale")
 parser.add_argument("--seed", type=int, default=0, help="set random seed")
 
 
@@ -88,17 +89,19 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     du_p = fa.TrialFunction(W)
 
     # Define function for setting Dirichlet values
-    lhs_expr = fa.Expression(('A*sin(pi*(x[1]-YMIN)/(YMAX-YMIN))', 0.),
-                            A=float(bc_params[0]),
-                            YMAX=YMAX,
-                            YMIN=YMIN,
-                            element=V.ufl_element())
-    lhs_u = fa.project(lhs_expr, fa.VectorFunctionSpace(mesh, 'P', 2))
-    #fa.plot(lhs_u)
-    #plt.show()
-    #pdb.set_trace()
+    lhs_expr = fa.Expression(
+        ("A*sin(pi*(x[1]-YMIN)/(YMAX-YMIN))", 0.0),
+        A=float(bc_params[0]),
+        YMAX=YMAX,
+        YMIN=YMIN,
+        element=V.ufl_element(),
+    )
+    lhs_u = fa.project(lhs_expr, fa.VectorFunctionSpace(mesh, "P", 2))
+    # fa.plot(lhs_u)
+    # plt.show()
+    # pdb.set_trace()
     bc_in = fa.DirichletBC(V, lhs_u, inlet)
-    bc_out = fa.DirichletBC(Q, fa.Constant((0.)), outlet)
+    bc_out = fa.DirichletBC(Q, fa.Constant((0.0)), outlet)
     bc_walls = fa.DirichletBC(V, fa.Constant((0.0, 0.0)), walls)
     # bc_pressure = fa.DirichletBC(Q, fa.Constant((1.)), inlet)
 
@@ -108,8 +111,11 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     u_p.vector().set_local(np.random.randn(len(u_p.vector())) * 1e-6)
 
     F = (
-        fa.inner(fa.grad(u), fa.grad(v))* fa.dx
-        + p * fa.div(v) * fa.dx
+        fa.inner(fa.grad(u), fa.grad(v)) * fa.dx
+        + PRESSURE_FACTOR
+        * p
+        * fa.div(v)
+        * fa.dx  # Pressure varies on 100x scale of velocity
         + q * fa.div(u) * fa.dx
     )
 
@@ -152,9 +158,25 @@ if __name__ == "__main__":
 
     points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
 
+    normalizer = fa.assemble(
+        fa.project(
+            fa.Constant((1.0)), fa.FunctionSpace(u_p.function_space().mesh(), "P", 2)
+        )
+        * fa.dx
+    )
+    for i in range(3):
+        solution_dim_i = fa.inner(
+            u_p, fa.Constant((0.0 + i == 0, 0.0 + i == 1, 0.0 + i == 2))
+        )
+        print(
+            "norm in dim {}: ".format(i),
+            fa.assemble(fa.inner(solution_dim_i, solution_dim_i) * fa.dx) / normalizer,
+        )
+
     u, p = u_p.split()
     plt.figure(figsize=(9, 3))
-    fa.plot(p)
+    clrs = fa.plot(p)
+    plt.colorbar(clrs)
     plt.show()
 
     plot_solution(u_p, params)
@@ -232,9 +254,13 @@ if __name__ == "__main__":
     fa.plot(u_p.function_space().mesh())
 
     plt.figure(figsize=(9, 3))
-    points_inlet, points_outlet, points_wall, points_pores, points_domain, = sample_points(
-        jax.random.PRNGKey(args.seed + 1), 1024, params
-    )
+    (
+        points_inlet,
+        points_outlet,
+        points_wall,
+        points_pores,
+        points_domain,
+    ) = sample_points(jax.random.PRNGKey(args.seed + 1), 1024, params)
 
     points_wall = np.concatenate([points_wall, points_pores])
 

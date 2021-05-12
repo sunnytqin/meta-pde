@@ -54,8 +54,12 @@ parser.add_argument(
     default=1024,
     help="num points in domain for validation",
 )
-parser.add_argument("--sqrt_loss", type=int, default=0, help="1=true. if true, "
-                    "minimize the rmse instead of the mse")
+parser.add_argument(
+    "--sqrt_loss",
+    type=int,
+    default=0,
+    help="1=true. if true, " "minimize the rmse instead of the mse",
+)
 parser.add_argument("--inner_steps", type=int, default=10, help="num inner steps")
 parser.add_argument("--outer_steps", type=int, default=int(1e5), help="num outer steps")
 parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
@@ -65,11 +69,13 @@ parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument("--siren", type=int, default=0, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
-parser.add_argument("--bc_weight", type=float, default=100., help="weight on bc loss")
+parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
 parser.add_argument(
     "--bc_scale", type=float, default=2e-1, help="scale on random uniform bc"
 )
-parser.add_argument("--grad_clip", type=float, default=None, help="max grad for clipping")
+parser.add_argument(
+    "--grad_clip", type=float, default=None, help="max grad for clipping"
+)
 
 parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
 parser.add_argument("--out_dir", type=str, default=None)
@@ -182,8 +188,9 @@ if __name__ == "__main__":
         temp_leap_def = leap_def._replace(inner_steps=inner_steps)
         final_model = jax.lax.cond(
             inner_steps != 0,
-            lambda _: leap.single_task_rollout(temp_leap_def, k2, model,
-                                               inner_loss_fn)[0],
+            lambda _: leap.single_task_rollout(temp_leap_def, k2, model, inner_loss_fn)[
+                0
+            ],
             lambda _: model,
             0,
         )
@@ -213,7 +220,7 @@ if __name__ == "__main__":
         coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
         err = coefs - ground_truth_vals
-        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=1, keepdims=True)
+        rel_sq_err = err ** 2 / np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
 
         return np.sqrt(np.mean(rel_sq_err)), np.sqrt(np.mean(rel_sq_err, axis=(0, 1)))
 
@@ -255,7 +262,7 @@ if __name__ == "__main__":
                 if args.grad_clip is not None and meta_grad_norm > args.grad_clip:
                     log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad = jax.tree_util.tree_map(
-                        lambda x: args.grad_clip*x / meta_grad_norm, meta_grad
+                        lambda x: args.grad_clip * x / meta_grad_norm, meta_grad
                     )
                 optimizer = optimizer.apply_gradient(meta_grad)
             else:
@@ -297,8 +304,9 @@ if __name__ == "__main__":
             tflogger.log_scalar("meta_loss", float(np.mean(losses[0][:, -1])), step)
             tflogger.log_scalar("val_loss", float(np.mean(val_losses[0][:, -1])), step)
             for i in range(len(per_dim_val_error)):
-                tflogger.log_scalar("val_error_dim_{}".format(i),
-                                    float(per_dim_val_error[i]), step)
+                tflogger.log_scalar(
+                    "val_error_dim_{}".format(i), float(per_dim_val_error[i]), step
+                )
             for k in losses[1]:
                 tflogger.log_scalar(
                     "meta_" + k, float(np.mean(losses[1][k][:, -1])), step
@@ -358,14 +366,17 @@ if __name__ == "__main__":
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
-
-
     if args.expt_name is not None:
         outfile.close()
 
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
-        optimizer.target, pde, fenics_functions, gt_params, get_final_model, leap_def,
+        optimizer.target,
+        pde,
+        fenics_functions,
+        gt_params,
+        get_final_model,
+        leap_def,
         args.inner_steps,
     )
     if args.expt_name is not None:
