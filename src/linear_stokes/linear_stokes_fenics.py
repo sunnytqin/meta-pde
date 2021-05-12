@@ -60,11 +60,11 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         make_domain(c1, c2, boundary_points, x0, y0, size)
         for c1, c2, x0, y0, size in per_hole_params[:n_holes]
     ]
-    obstacle = holes[0]
-    for o2 in holes[1:]:
-        obstacle = obstacle + o2
-
-    domain = domain - obstacle
+    if n_holes > 0:
+        obstacle = holes[0]
+        for o2 in holes[1:]:
+            obstacle = obstacle + o2
+        domain = domain - obstacle
 
     mesh = mshr.generate_mesh(domain, resolution)
 
@@ -75,7 +75,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         return on_boundary and fa.near(x[0], XMAX)
 
     def walls(x, on_boundary):
-        return on_boundary
+        return on_boundary and not (fa.near(x[0], XMIN) or fa.near(x[0], XMAX))
 
     V_h = fa.VectorElement("CG", mesh.ufl_cell(), 2)
     Q_h = fa.FiniteElement("CG", mesh.ufl_cell(), 1)
@@ -126,15 +126,6 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         },
     )
 
-    # Enforce zero mean pressure
-    u1, p1 = fa.split(fa.interpolate(fa.Constant((1., 1., 1.)), W))
-
-    mean_pressure = fa.assemble(p * fa.dx) / fa.assemble(p1 * fa.dx)
-
-    # Every point is a weighted sum of coefs with weight ssumming to 1,
-    # so just subtract mean pressure from all the coefs corresponding to pressure
-    u_p.vector()[W.sub(1).dofmap().dofs()] -= mean_pressure
-
     return u_p
 
 
@@ -152,6 +143,7 @@ if __name__ == "__main__":
 
     params = sample_params(jax.random.PRNGKey(args.seed), args)
     source_params, bc_params, per_hole_params, num_holes = params
+
     print("params: ", params)
 
     u_p = solve_fenics(params)
@@ -159,6 +151,11 @@ if __name__ == "__main__":
     x = np.array(u_p.function_space().tabulate_dof_coordinates()[:100])
 
     points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
+
+    u, p = u_p.split()
+    plt.figure(figsize=(9, 3))
+    fa.plot(p)
+    plt.show()
 
     plot_solution(u_p, params)
     plt.show()
@@ -191,7 +188,10 @@ if __name__ == "__main__":
     V_ = np.array([uv[1] for uv in UV_])
 
     plt.figure(figsize=(9, 3))
+    fa.plot(p)
+    plt.show()
 
+    plt.figure(figsize=(9, 3))
     parr = np.array([p([x, y]) for x, y in zip(Xflat_, Yflat_)])
     fa.plot(
         p,

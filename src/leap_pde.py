@@ -65,7 +65,7 @@ parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument("--siren", type=int, default=0, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
-parser.add_argument("--bc_weight", type=float, default=3e1, help="weight on bc loss")
+parser.add_argument("--bc_weight", type=float, default=100., help="weight on bc loss")
 parser.add_argument(
     "--bc_scale", type=float, default=2e-1, help="scale on random uniform bc"
 )
