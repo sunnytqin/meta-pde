@@ -242,12 +242,12 @@ if __name__ == "__main__":
             maml_def.inner_steps,
             maml_def,
         )
-        coefs = coefs.reshape(coefs.shape[0], -1)
+        coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
         err = coefs - ground_truth_vals
-        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=0, keepdims=True)
+        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=1, keepdims=True)
 
-        return np.sqrt(np.mean(rel_sq_err))
+        return np.sqrt(np.mean(rel_sq_err)), np.sqrt(np.mean(rel_sq_err, axis=(0, 1)))
 
     @jax.jit
     def validation_losses(model_and_lrs, maml_def=maml_def):
@@ -298,11 +298,11 @@ if __name__ == "__main__":
                 log("NaN grad!")
 
         if step % args.val_every == 0:
-            val_error = vmap_validation_error(
+            val_error, per_dim_val_error = vmap_validation_error(
                 (optimizer.target, inner_lrs), gt_params, coords, fenics_vals,
             )
 
-            val_losses, val_meta_losses = validation_losses((optimizer.target, inner_lrs))
+            val_meta_losses = validation_losses((optimizer.target, inner_lrs))
 
         log(
             "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
@@ -337,6 +337,9 @@ if __name__ == "__main__":
                 tflogger.log_scalar(
                     "meta_" + k, float(np.mean(meta_losses[1][k])), step
                 )
+            for i in range(len(per_dim_val_error)):
+                tflogger.log_scalar("val_error_dim_{}".format(i),
+                                    float(per_dim_val_error[i]), step)
             for inner_step in range(args.inner_steps + 1):
                 tflogger.log_scalar(
                     "loss_step_{}".format(inner_step),

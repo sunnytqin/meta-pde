@@ -222,12 +222,12 @@ if __name__ == "__main__":
         coefs = vmap(make_coef_func, (0, None, 0, 0))(
             keys, model, ground_truth_params, points,
         )
-        coefs = coefs.reshape(coefs.shape[0], -1)
+        coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
         err = coefs - ground_truth_vals
-        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=0, keepdims=True)
+        rel_sq_err = err**2 / np.mean(ground_truth_vals**2, axis=1, keepdims=True)
 
-        return np.sqrt(np.mean(rel_sq_err))
+        return np.sqrt(np.mean(rel_sq_err)), np.sqrt(np.mean(rel_sq_err, axis=(0, 1)))
 
     @jax.jit
     def validation_losses(model):
@@ -339,7 +339,7 @@ if __name__ == "__main__":
                 log("NaN grad!")
 
         if step % args.val_every == 0:
-            val_error = vmap_validation_error(
+            val_error, per_dim_val_error = vmap_validation_error(
                 optimizer.target, gt_params, coords, fenics_vals,
             )
 
@@ -347,8 +347,9 @@ if __name__ == "__main__":
 
         log(
             "step: {}, loss: {}, val_loss: {}, val_err: {}, "
-            "grad_norm: {}, time: {}".format(
-                step, loss, val_loss, val_error, grad_norm, t.interval,
+            "per_dim_val_error: {}, grad_norm: {}, time: {}".format(
+                step, loss, val_loss, val_error,
+                per_dim_val_error, grad_norm, t.interval,
             )
         )
 
@@ -359,6 +360,10 @@ if __name__ == "__main__":
             tflogger.log_scalar("val_loss", float(np.mean(val_loss)), step)
 
             tflogger.log_scalar("val_error", float(val_error), step)
+            for i in range(len(per_dim_val_error)):
+                tflogger.log_scalar("val_error_dim_{}".format(i),
+                                    float(per_dim_val_error[i]), step)
+
             tflogger.log_scalar("meta_grad_norm", float(grad_norm), step)
             tflogger.log_scalar("step_time", t.interval, step)
             for k in loss_aux:
