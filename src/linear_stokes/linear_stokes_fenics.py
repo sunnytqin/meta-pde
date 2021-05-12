@@ -75,7 +75,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         return on_boundary and fa.near(x[0], XMAX)
 
     def walls(x, on_boundary):
-        return on_boundary
+        return on_boundary and (not fa.near(x[0], XMAX)) and (not fa.near(x[0], XMIN))
 
     V_h = fa.VectorElement("CG", mesh.ufl_cell(), 2)
     Q_h = fa.FiniteElement("CG", mesh.ufl_cell(), 1)
@@ -126,14 +126,6 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         },
     )
 
-    # Enforce zero mean pressure
-    u1, p1 = fa.split(fa.interpolate(fa.Constant((1., 1., 1.)), W))
-
-    mean_pressure = fa.assemble(p * fa.dx) / fa.assemble(p1 * fa.dx)
-
-    # Every point is a weighted sum of coefs with weight ssumming to 1,
-    # so just subtract mean pressure from all the coefs corresponding to pressure
-    u_p.vector()[W.sub(1).dofmap().dofs()] -= mean_pressure
 
     return u_p
 
