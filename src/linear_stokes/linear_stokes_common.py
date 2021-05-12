@@ -145,7 +145,8 @@ def loss_fn(field_fn, points, params):
 def sample_params(key, args):
 
     if hasattr(args, 'fixed_num_pdes') and args.fixed_num_pdes is not None:
-        key = jax.random.PRNGKey(jax.random.randint(key, (1,), np.array([0]), np.array([args.fixed_num_pdes]))[0])
+        key = jax.random.PRNGKey(jax.random.randint(key, (1,), np.array([0]),
+                                                    np.array([args.fixed_num_pdes]))[0])
 
     k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
 
@@ -173,8 +174,10 @@ def sample_params(key, args):
 
     pore_x0y0 = jax.random.uniform(
         k5,
-        minval=np.array([[XMIN + np.max(pore_sizes), YMIN + np.max(pore_sizes)]]),
-        maxval=np.array([[XMAX - np.max(pore_sizes), YMAX - np.max(pore_sizes)]]),
+        minval=np.array([[XMIN + 1.5*np.max(pore_sizes),
+                          YMIN + 1.5*np.max(pore_sizes)]]),
+        maxval=np.array([[XMAX - 1.5*np.max(pore_sizes),
+                          YMAX - 1.5*np.max(pore_sizes)]]),
         shape=(MAX_HOLES, 2),
     )
 

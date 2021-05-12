@@ -341,14 +341,13 @@ if __name__ == "__main__":
                 leap_def,
                 args.inner_steps,
             )
+            if args.expt_name is not None:
+                plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
 
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
-            if args.expt_name is not None:
-                plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
-            else:
-                plt.show()
+
 
     if args.expt_name is not None:
         outfile.close()

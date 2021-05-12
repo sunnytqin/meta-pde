@@ -60,7 +60,7 @@ parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size
 parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--siren", type=int, default=0, help="1=true.")
+parser.add_argument("--siren", type=int, default=1, help="1=true.")
 parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
 parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
 parser.add_argument(
@@ -70,8 +70,12 @@ parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE"
 parser.add_argument("--out_dir", type=str, default=None)
 parser.add_argument("--expt_name", type=str, default="nn_default")
 parser.add_argument("--viz_every", type=int, default=100, help="plot every N steps")
+
+parser.add_argument("--val_every", type=int, default=25, help="validate every N steps")
+
 parser.add_argument("--measure_grad_norm_every", type=int, default=100, help="plot every N steps")
 
+parser.add_argument('--profile', type=int, default=0, help='start profiler')
 parser.add_argument(
     "--fixed_num_pdes",
     type=int,
@@ -212,6 +216,13 @@ if __name__ == "__main__":
 
     assert args.n_eval % 2 == 0
 
+    with Timer() as t1:
+        params = pde.sample_params(jax.random.PRNGKey(0), args)
+    with Timer() as t2:
+        points = pde.sample_points(jax.random.PRNGKey(1), args.outer_points, params)
+    print("Time to sample params: ", t1.interval)
+    print("Time to sample points: ", t2.interval)
+
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 
     gt_keys = jax.random.split(gt_key, args.n_eval)
@@ -301,12 +312,12 @@ if __name__ == "__main__":
             else:
                 log("NaN grad!")
 
+        if step % args.val_every == 0:
+            val_error = vmap_validation_error(
+                optimizer.target, gt_params, coords, fenics_vals,
+            )
 
-        val_error = vmap_validation_error(
-            optimizer.target, gt_params, coords, fenics_vals,
-        )
-
-        val_loss = validation_losses(optimizer.target)
+            val_loss = validation_losses(optimizer.target)
 
         log(
             "step: {}, loss: {}, val_loss: {}, val_err: {}, "
@@ -347,13 +358,11 @@ if __name__ == "__main__":
                 0,
             )
 
-            if tflogger is not None:
-                tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
-
             if args.expt_name is not None:
                 plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
-            else:
-                plt.show()
+
+            if tflogger is not None:
+                tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
     if args.expt_name is not None:
         outfile.close()
