@@ -53,7 +53,7 @@ flags.DEFINE_integer("inner_steps", 10, "num_inner_steps")
 
 def main(argv):
     if FLAGS.out_dir is None:
-        FLAGS.out_dir = FLAGS.pde + "_nn_results"
+        FLAGS.out_dir = FLAGS.pde + "_leap_results"
 
     pde = get_pde(FLAGS.pde)
 

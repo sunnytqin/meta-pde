@@ -56,7 +56,7 @@ flags.DEFINE_float("outer_loss_decay", 0.1, "0. = just take final loss. 1.=sum a
 
 def main(arvg):
     if FLAGS.out_dir is None:
-        FLAGS.out_dir = FLAGS.pde + "_nn_results"
+        FLAGS.out_dir = FLAGS.pde + "_maml_results"
 
     pde = get_pde(FLAGS.pde)
 
