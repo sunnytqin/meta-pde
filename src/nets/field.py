@@ -21,6 +21,7 @@ def siren_init(omega):
             -np.sqrt(6.0 / fan_in) / omega,
             np.sqrt(6.0 / fan_in) / omega,
         )
+
     return init_fn
 
 
@@ -30,6 +31,7 @@ def first_layer_siren_init(omega, omega0):
         return (omega0 / omega) * jax.random.uniform(
             key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in
         )
+
     return init_fn
 
 
@@ -137,8 +139,8 @@ def nf_apply(
     mean_y=None,
     std_y=None,
     n_fourier=None,
-    omega=30.,
-    omega0=30.,
+    omega=30.0,
+    omega0=30.0,
 ):
     if nonlinearity == np.sin:
         kernel_init = siren_init(omega)
@@ -163,15 +165,9 @@ def nf_apply(
 
 class NeuralField2d(nn.Module):
     def apply(
-        self,
-        *args,
-        **kwargs,
+        self, *args, **kwargs,
     ):
-        return nf_apply(
-            x.shape[-1],
-            *args,
-            **kwargs,
-        )
+        return nf_apply(x.shape[-1], *args, **kwargs,)
 
 
 NeuralField = NeuralField2d
@@ -179,29 +175,17 @@ NeuralField = NeuralField2d
 
 class NeuralField1d(nn.Module):
     def apply(
-        self,
-        *args,
-        **kwargs,
+        self, *args, **kwargs,
     ):
-        return nf_apply(
-            1,
-            *args,
-            **kwargs,
-        ).sum(axis=-1)
+        return nf_apply(1, *args, **kwargs,).sum(axis=-1)
 
 
 def make_nf_ndim(n_dims):
     class HigherDimNeuralField(nn.Module):
         def apply(
-            self,
-            *args,
-            **kwargs,
+            self, *args, **kwargs,
         ):
-            return nf_apply(
-                n_dims,
-                *args,
-                **kwargs,
-            )
+            return nf_apply(n_dims, *args, **kwargs,)
 
     return HigherDimNeuralField
 

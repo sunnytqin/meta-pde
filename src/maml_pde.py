@@ -36,150 +36,89 @@ import shutil
 from copy import deepcopy
 from collections import namedtuple
 
-import argparse
+from .util import common_flags
+
+from absl import app
+from absl import flags
+
+FLAGS = flags.FLAGS
+
+flags.DEFINE_integer("bsize", 16, "batch size (in tasks)")
+flags.DEFINE_float("outer_lr", 1e-3, "outer learning rate")
+
+flags.DEFINE_float("inner_lr", 3e-5, "inner learning rate")
+flags.DEFINE_float("lr_inner_lr", 1.0 / 2, "lr for inner learning rate")
+flags.DEFINE_integer("inner_steps", 5, "num_inner_steps")
+
+flags.DEFINE_float("outer_loss_decay", 0.1, "0. = just take final loss. 1.=sum all")
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--bsize", type=int, default=16, help="batch size (in tasks)")
-parser.add_argument("--n_eval", type=int, default=16, help="num eval tasks")
-parser.add_argument("--inner_lr", type=float, default=3e-5, help="inner learning rate")
-parser.add_argument("--outer_lr", type=float, default=1e-3, help="outer learning rate")
-parser.add_argument(
-    "--lr_inner_lr", type=float, default=3e-1, help="lr for inner learning rate"
-)
-parser.add_argument(
-    "--outer_points",
-    type=int,
-    default=256,
-    help="num query points on the boundary and in domain",
-)
-parser.add_argument(
-    "--inner_points",
-    type=int,
-    default=256,
-    help="num support points on the boundary and in domain",
-)
-parser.add_argument(
-    "--validation_points",
-    type=int,
-    default=512,
-    help="num points in domain for validation",
-)
-parser.add_argument(
-    "--grad_clip", type=float, default=None, help="max grad for clipping"
-)
+def main(arvg):
+    if FLAGS.out_dir is None:
+        FLAGS.out_dir = FLAGS.pde + "_nn_results"
 
-parser.add_argument("--inner_steps", type=int, default=5, help="num inner steps")
-parser.add_argument("--outer_steps", type=int, default=int(1e6), help="num outer steps")
-parser.add_argument("--num_layers", type=int, default=3, help="num fcnn layers")
-parser.add_argument("--layer_size", type=int, default=256, help="fcnn layer size")
-parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument(
-    "--sqrt_loss",
-    type=int,
-    default=0,
-    help="1=true. if true, " "minimize the rmse instead of the mse",
-)
-parser.add_argument("--siren", type=int, default=1, help="1=true.")
-parser.add_argument("--pcgrad", type=float, default=0.0, help="1=true.")
-parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc loss")
-parser.add_argument(
-    "--outer_loss_decay",
-    type=float,
-    default=0.1,
-    help="0. = just take final loss. 1.=sum all",
-)
-parser.add_argument(
-    "--bc_scale", type=float, default=1.0, help="scale on random uniform bc"
-)
-parser.add_argument("--pde", type=str, default="linear_stokes", help="which PDE")
-parser.add_argument("--out_dir", type=str, default=None)
-parser.add_argument("--expt_name", type=str, default="maml_default")
-parser.add_argument("--val_every", type=int, default=25, help="validate every N steps")
+    pde = get_pde(FLAGS.pde)
 
-parser.add_argument("--viz_every", type=int, default=250, help="plot every N steps")
-parser.add_argument(
-    "--fixed_num_pdes",
-    type=int,
-    default=None,
-    help="set to e.g. 1 to force just 1 possible pde param",
-)
+    path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
 
-
-if __name__ == "__main__":
-    args = parser.parse_args()
-
-    if args.out_dir is None:
-        args.out_dir = args.pde + "_meta_results"
-    # make into a hashable, immutable namedtuple
-    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
-
-    pde = get_pde(args.pde)
-
-    path, log, tflogger = trainer_util.prepare_logging(args)
-
-    log(str(args))
+    log(str(FLAGS))
 
     # --------------------- Defining the meta-training algorithm --------------------
 
     def loss_fn(field_fn, points, params):
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
 
-        loss = args.bc_weight * np.sum(
+        loss = FLAGS.bc_weight * np.sum(
             np.array([bl for bl in boundary_losses.values()])
         ) + np.sum(np.array([dl for dl in domain_losses.values()]))
 
-        if args.sqrt_loss:
-            loss = np.sqrt(loss)
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
 
     def make_task_loss_fns(key):
         # The input key is terminal
-        params = pde.sample_params(key, args)
+        params = pde.sample_params(key)
 
         def inner_loss(key, field_fn, params=params):
-            inner_points = pde.sample_points(key, args.inner_points, params)
+            inner_points = pde.sample_points(key, FLAGS.inner_points, params)
             return loss_fn(field_fn, inner_points, params)
 
         def outer_loss(key, field_fn, params=params):
-            outer_points = pde.sample_points(key, args.outer_points, params)
+            outer_points = pde.sample_points(key, FLAGS.outer_points, params)
             return loss_fn(field_fn, outer_points, params)
 
         return inner_loss, outer_loss
 
-    make_inner_opt = flax.optim.Momentum(learning_rate=args.inner_lr, beta=0.0).create
+    make_inner_opt = flax.optim.Momentum(learning_rate=FLAGS.inner_lr, beta=0.0).create
 
     maml_def = maml.MamlDef(
         make_inner_opt=make_inner_opt,
         make_task_loss_fns=make_task_loss_fns,
-        inner_steps=args.inner_steps,
-        n_batch_tasks=args.bsize,
+        inner_steps=FLAGS.inner_steps,
+        n_batch_tasks=FLAGS.bsize,
         softplus_lrs=True,
-        outer_loss_decay=args.outer_loss_decay,
+        outer_loss_decay=FLAGS.outer_loss_decay,
     )
 
     Field = pde.BaseField.partial(
-        sizes=[args.layer_size for _ in range(args.num_layers)],
+        sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
         dense_args=(),
-        nonlinearity=np.sin if args.siren else nn.swish,
+        nonlinearity=np.sin if FLAGS.siren else nn.swish,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-    optimizer = flax.optim.Adam(learning_rate=args.outer_lr, beta2=0.98).create(
+    optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta2=0.98).create(
         flax.nn.Model(Field, init_params)
     )
 
-    inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(args.lr_inner_lr)
+    inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(FLAGS.lr_inner_lr)
 
     # Per param per step lrs
     inner_lr_state = inner_lr_init(
         jax.tree_map(
-            lambda x: np.stack([np.ones_like(x) for _ in range(args.inner_steps)]),
+            lambda x: np.stack([np.ones_like(x) for _ in range(FLAGS.inner_steps)]),
             optimizer.target,
         )
     )
@@ -191,7 +130,7 @@ if __name__ == "__main__":
         # Input key is terminal
         model, inner_lrs = model_and_lrs
         k1, k2 = jax.random.split(key, 2)
-        inner_points = pde.sample_points(k1, args.inner_points, params)
+        inner_points = pde.sample_points(k1, FLAGS.inner_points, params)
         inner_loss_fn = lambda key, field_fn: loss_fn(field_fn, inner_points, params)
 
         inner_lrs = jax.tree_map(lambda x: x[:inner_steps], inner_lrs)
@@ -220,7 +159,7 @@ if __name__ == "__main__":
         model_and_lrs, ground_truth_params, points, ground_truth_vals,
     ):
         key = jax.random.PRNGKey(0)
-        keys = jax.random.split(key, args.n_eval)
+        keys = jax.random.split(key, FLAGS.n_eval)
         coefs = vmap(make_coef_func, (0, None, 0, 0, None, None))(
             keys,
             model_and_lrs,
@@ -244,21 +183,19 @@ if __name__ == "__main__":
         )
         return losses, meta_losses
 
-    assert args.n_eval % 2 == 0
-
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 
-    gt_keys = jax.random.split(gt_key, args.n_eval)
-    gt_params = vmap(pde.sample_params, (0, None))(gt_keys, args)
+    gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
+    gt_params = vmap(pde.sample_params)(gt_keys)
     print("gt_params: {}".format(gt_params))
 
     fenics_functions, fenics_vals, coords = trainer_util.get_ground_truth_points(
-        args, pde, jax_tools.tree_unstack(gt_params), gt_points_key
+        pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
     # --------------------- Run MAML --------------------
 
-    for step in range(args.outer_steps):
+    for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key, 2)
 
         inner_lrs = inner_lr_get(inner_lr_state)
@@ -274,22 +211,24 @@ if __name__ == "__main__":
                 )
             )
             if np.isfinite(meta_grad_norm):
-                if args.grad_clip is not None and meta_grad_norm > args.grad_clip:
+                if FLAGS.grad_clip is not None and meta_grad_norm > FLAGS.grad_clip:
                     log("clipping gradients with norm {}".format(meta_grad_norm))
                     meta_grad[0] = jax.tree_util.tree_map(
-                        lambda x: args.grad_clip * x / meta_grad_norm, meta_grad[0]
+                        lambda x: FLAGS.grad_clip * x / meta_grad_norm, meta_grad[0]
                     )
                 optimizer = optimizer.apply_gradient(meta_grad[0])
                 inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
             else:
                 log("NaN grad!")
 
-        if step % args.val_every == 0:
+        if step % FLAGS.val_every == 0:
             val_error, per_dim_val_error = vmap_validation_error(
                 (optimizer.target, inner_lrs), gt_params, coords, fenics_vals,
             )
 
-            val_meta_losses = validation_losses((optimizer.target, inner_lrs))
+            val_losses, val_meta_losses = validation_losses(
+                (optimizer.target, inner_lrs)
+            )
 
         log(
             "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
@@ -328,7 +267,7 @@ if __name__ == "__main__":
                 tflogger.log_scalar(
                     "val_error_dim_{}".format(i), float(per_dim_val_error[i]), step
                 )
-            for inner_step in range(args.inner_steps + 1):
+            for inner_step in range(FLAGS.inner_steps + 1):
                 tflogger.log_scalar(
                     "loss_step_{}".format(inner_step),
                     float(np.mean(losses[0][:, inner_step])),
@@ -359,20 +298,20 @@ if __name__ == "__main__":
             tflogger.log_scalar("meta_grad_norm", float(meta_grad_norm), step)
             tflogger.log_scalar("step_time", t.interval, step)
 
-            if step % args.viz_every == 0:
+            if step % FLAGS.viz_every == 0:
                 # These take lots of filesize so only do them sometimes
 
                 for k, v in jax_tools.dict_flatten(optimizer.target.params):
                     tflogger.log_histogram("Param: " + k, v.flatten(), step)
 
-                for inner_step in range(args.inner_steps):
+                for inner_step in range(FLAGS.inner_steps):
                     for k, v in jax_tools.dict_flatten(inner_lrs.params):
                         tflogger.log_histogram(
                             "inner_lr_{}: ".format(inner_step) + k,
                             jax.nn.softplus(v[inner_step].flatten()),
                             step,
                         )
-        if args.viz_every > 0 and step % args.viz_every == 0:
+        if FLAGS.viz_every > 0 and step % FLAGS.viz_every == 0:
             plt.figure()
             # pdb.set_trace()
             trainer_util.compare_plots_with_ground_truth(
@@ -382,16 +321,16 @@ if __name__ == "__main__":
                 gt_params,
                 get_final_model,
                 maml_def,
-                args.inner_steps,
+                FLAGS.inner_steps,
             )
 
-            if args.expt_name is not None:
+            if FLAGS.expt_name is not None:
                 plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
 
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
-    if args.expt_name is not None:
+    if FLAGS.expt_name is not None:
         outfile.close()
 
     plt.figure()
@@ -402,9 +341,13 @@ if __name__ == "__main__":
         gt_params,
         get_final_model,
         maml_def,
-        args.inner_steps,
+        FLAGS.inner_steps,
     )
-    if args.expt_name is not None:
+    if FLAGS.expt_name is not None:
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
     else:
         plt.show()
+
+
+if __name__ == "__main__":
+    app.run(main)

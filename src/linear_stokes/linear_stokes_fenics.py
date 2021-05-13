@@ -13,6 +13,12 @@ import argparse
 import jax
 from collections import namedtuple
 
+from absl import app
+from absl import flags
+from ..util import common_flags
+
+FLAGS = flags.FLAGS
+
 from .linear_stokes_common import (
     plot_solution,
     loss_fn,
@@ -22,21 +28,7 @@ from .linear_stokes_common import (
     sample_params,
     sample_points,
     is_in_hole,
-    XMIN,
-    XMAX,
-    YMIN,
-    YMAX,
-    PRESSURE_FACTOR,
 )
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--bc_scale", type=float, default=1e0, help="bc scale")
-parser.add_argument("--seed", type=int, default=0, help="set random seed")
-parser.add_argument("--num_holes", type=int, default=None, help="set num holes")
 
 
 def point_theta(theta, c1, c2, x0, y0, size):
@@ -54,7 +46,7 @@ def make_domain(c1, c2, n_points, x0, y0, size):
 
 def solve_fenics(params, boundary_points=32, resolution=32):
     domain = mshr.Rectangle(
-        fa.Point(np.array([XMIN, YMIN])), fa.Point(np.array([XMAX, YMAX]))
+        fa.Point([FLAGS.xmin, FLAGS.ymin]), fa.Point([FLAGS.xmax, FLAGS.ymax]),
     )
     source_params, bc_params, per_hole_params, n_holes = params
     # pdb.set_trace()
@@ -71,16 +63,16 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     mesh = mshr.generate_mesh(domain, resolution)
 
     def inlet(x, on_boundary):
-        return on_boundary and fa.near(x[0], XMIN)
+        return on_boundary and fa.near(x[0], FLAGS.xmin)
 
     def outlet(x, on_boundary):
-        return on_boundary and fa.near(x[0], XMAX)
+        return on_boundary and fa.near(x[0], FLAGS.xmax)
 
     def walls(x, on_boundary):
         return on_boundary and (
-            (fa.near(x[1], YMIN) or fa.near(x[1], YMAX)) or
-            (not(fa.near(x[0], XMIN) or fa.near(x[0], XMAX)))
-            )
+            (fa.near(x[1], FLAGS.ymin) or fa.near(x[1], FLAGS.ymax))
+            or (not (fa.near(x[0], FLAGS.xmin) or fa.near(x[0], FLAGS.xmax)))
+        )
 
     V_h = fa.VectorElement("CG", mesh.ufl_cell(), 2)
     Q_h = fa.FiniteElement("CG", mesh.ufl_cell(), 1)
@@ -94,10 +86,10 @@ def solve_fenics(params, boundary_points=32, resolution=32):
 
     # Define function for setting Dirichlet values
     lhs_expr = fa.Expression(
-        ("A*sin(pi*(x[1]-YMIN)/(YMAX-YMIN))", 0.0),
+        ("A*sin(pi*(x[1]-ymin)/(ymax-ymin))", 0.0),
         A=float(bc_params[0]),
-        YMAX=YMAX,
-        YMIN=YMIN,
+        ymax=FLAGS.ymax,
+        ymin=FLAGS.ymin,
         element=V.ufl_element(),
     )
     lhs_u = fa.project(lhs_expr, fa.VectorFunctionSpace(mesh, "P", 2))
@@ -112,11 +104,14 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     dx = fa.Measure("dx")
 
     # Define variational problem
-    #u_p.vector().set_local(np.random.randn(len(u_p.vector())) * 1e-6)
+    # u_p.vector().set_local(np.random.randn(len(u_p.vector())) * 1e-6)
 
     F = (
         fa.inner(fa.grad(u), fa.grad(v)) * fa.dx
-        + PRESSURE_FACTOR * p * fa.div(v) * fa.dx  # Pressure varies on 100x scale of velocity
+        + FLAGS.pressure_factor
+        * p
+        * fa.div(v)
+        * fa.dx  # Pressure varies on 100x scale of velocity
         + q * fa.div(u) * fa.dx
     )
 
@@ -144,16 +139,9 @@ def is_defined(xy, u):
     )
 
 
-if __name__ == "__main__":
-    args = parser.parse_args()
-    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
-
-    params = sample_params(jax.random.PRNGKey(args.seed), args)
+def main(argv):
+    params = sample_params(jax.random.PRNGKey(FLAGS.seed))
     source_params, bc_params, per_hole_params, num_holes = params
-
-    if args.num_holes is not None:
-        num_holes = args.num_holes
-        params = (source_params, bc_params, per_hole_params, num_holes)
 
     print("params: ", params)
 
@@ -161,7 +149,7 @@ if __name__ == "__main__":
 
     x = np.array(u_p.function_space().tabulate_dof_coordinates()[:100])
 
-    points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
+    points = sample_points(jax.random.PRNGKey(FLAGS.seed + 1), 128, params)
 
     normalizer = fa.assemble(
         fa.project(
@@ -190,7 +178,10 @@ if __name__ == "__main__":
 
     u, p = u_p.split()
     # plot solution
-    X, Y = np.meshgrid(np.linspace(XMIN, XMAX, 300), np.linspace(YMIN, YMAX, 100))
+    X, Y = np.meshgrid(
+        np.linspace(FLAGS.xmin, FLAGS.xmax, 300),
+        np.linspace(FLAGS.ymin, FLAGS.ymax, 100),
+    )
     Xflat, Yflat = X.reshape(-1), Y.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
@@ -204,7 +195,9 @@ if __name__ == "__main__":
     U = np.array([uv[0] for uv in UV]).reshape(X.shape)
     V = np.array([uv[1] for uv in UV]).reshape(Y.shape)
 
-    X_, Y_ = np.meshgrid(np.linspace(XMIN, XMAX, 60), np.linspace(YMIN, YMAX, 40))
+    X_, Y_ = np.meshgrid(
+        np.linspace(FLAGS.xmin, FLAGS.xmax, 60), np.linspace(FLAGS.ymin, FLAGS.ymax, 40)
+    )
     Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
@@ -237,7 +230,8 @@ if __name__ == "__main__":
     speed_ = np.linalg.norm(np.stack([U_, V_], axis=1), axis=1)
 
     seed_points = np.stack(
-        [XMIN * np.ones(40), np.linspace(YMIN + 0.1, YMAX - 0.1, 40)], axis=1
+        [FLAGS.xmin * np.ones(40), np.linspace(FLAGS.ymin + 0.1, FLAGS.ymax - 0.1, 40)],
+        axis=1,
     )
 
     plt.quiver(Xflat_, Yflat_, U_, V_, speed_ / speed_.max(), alpha=0.7)
@@ -266,7 +260,7 @@ if __name__ == "__main__":
         points_wall,
         points_pores,
         points_domain,
-    ) = sample_points(jax.random.PRNGKey(args.seed + 1), 1024, params)
+    ) = sample_points(jax.random.PRNGKey(FLAGS.seed + 1), 1024, params)
 
     points_wall = np.concatenate([points_wall, points_pores])
 
@@ -277,3 +271,9 @@ if __name__ == "__main__":
     plt.scatter(points_domain[:, 0], points_domain[:, 1], color="b", alpha=0.5)
 
     plt.show()
+
+
+if __name__ == "__main__":
+    app.run(main)
+    args = parser.parse_args()
+    args = namedtuple("ArgsTuple", vars(args))(**vars(args))

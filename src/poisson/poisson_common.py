@@ -13,8 +13,13 @@ import fenics as fa
 import matplotlib.pyplot as plt
 import pdb
 
+from absl import app
+from absl import flags
 
-DTYPE = np.float32
+FLAGS = flags.FLAGS
+
+flags.DEFINE_float("bc_scale", 0.2, "scale on random uniform bc")
+flags.DEFINE_float("bc_weight", 10.0, "weight on bc loss")
 
 
 def plot_solution(u, params):
@@ -38,31 +43,29 @@ def loss_fn(potential_fn, points, params):
 
 
 @partial(jax.jit, static_argnums=(1,))
-def sample_params(key, args):
+def sample_params(key):
 
-    if hasattr(args, "fixed_num_pdes") and args.fixed_num_pdes is not None:
+    if FLAGS.fixed_num_pdes is not None:
         key = jax.random.PRNGKey(
             jax.random.randint(
-                key, (1,), np.array([0]), np.array([args.fixed_num_pdes])
+                key, (1,), np.array([0]), np.array([FLAGS.fixed_num_pdes])
             )[0]
         )
 
     k1, k2, k3 = jax.random.split(key, 3)
 
     # These keys will all be 0 if we're not varying that factor
-    k1 = k1 * args.vary_source
-    k2 = k2 * args.vary_bc
-    k3 = k3 * args.vary_geometry
+    k1 = k1 * FLAGS.vary_source
+    k2 = k2 * FLAGS.vary_bc
+    k3 = k3 * FLAGS.vary_geometry
 
-    source_params = jax.random.normal(k1, shape=(2, 3,), dtype=DTYPE)
+    source_params = jax.random.normal(k1, shape=(2, 3,))
 
-    bc_params = args.bc_scale * jax.random.uniform(
-        k2, minval=-1.0, maxval=1.0, shape=(5,), dtype=DTYPE
+    bc_params = FLAGS.bc_scale * jax.random.uniform(
+        k2, minval=-1.0, maxval=1.0, shape=(5,)
     )
 
-    geo_params = jax.random.uniform(
-        k3, minval=-0.2, maxval=0.2, shape=(2,), dtype=DTYPE
-    )
+    geo_params = jax.random.uniform(k3, minval=-0.2, maxval=0.2, shape=(2,))
 
     return source_params, bc_params, geo_params
 
@@ -78,9 +81,9 @@ def sample_points(key, n, params):
 def sample_points_on_boundary(key, n, params):
     _, _, geo_params = params
     c1, c2 = geo_params
-    theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
+    theta = np.linspace(0.0, 2 * np.pi, n)
     theta = theta + jax.random.uniform(
-        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
+        key, minval=0.0, maxval=(2 * np.pi / n), shape=(n,)
     )
     r0 = 1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta)
     x = r0 * np.cos(theta)
@@ -93,16 +96,14 @@ def sample_points_in_domain(key, n, params):
     _, _, geo_params = params
     c1, c2 = geo_params
     key1, key2, key3 = jax.random.split(key, 3)
-    theta = np.linspace(0.0, 2 * np.pi, n, dtype=DTYPE)
+    theta = np.linspace(0.0, 2 * np.pi, n)
     theta = theta + jax.random.uniform(
-        key1, minval=0.0, maxval=(2 * np.pi / n), shape=(n,), dtype=DTYPE
+        key1, minval=0.0, maxval=(2 * np.pi / n), shape=(n,)
     )
     r0 = 1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta)
-    dr = np.linspace(0.0, 1.0 - 1.0 / n, n, dtype=DTYPE)
+    dr = np.linspace(0.0, 1.0 - 1.0 / n, n)
     dr = jax.random.permutation(key2, dr)
-    dr = dr + jax.random.uniform(
-        key3, minval=0.0, maxval=1.0 / n, shape=(n,), dtype=DTYPE
-    )
+    dr = dr + jax.random.uniform(key3, minval=0.0, maxval=1.0 / n, shape=(n,))
     r = dr * r0
     x = r * np.cos(theta)
     y = r * np.sin(theta)

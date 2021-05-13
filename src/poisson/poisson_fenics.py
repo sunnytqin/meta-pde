@@ -24,16 +24,17 @@ import pdb
 
 import fenics as fa
 
+import pdb
+
 import argparse
 from collections import namedtuple
 
 from .poisson_common import sample_params, boundary_conditions, source
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--vary_source", type=int, default=0, help="1 for true")
-parser.add_argument("--vary_bc", type=int, default=0, help="1 for true")
-parser.add_argument("--vary_geometry", type=int, default=0, help="1=true.")
-parser.add_argument("--bc_scale", type=float, default=1e-2, help="bc scale")
+from absl import app
+from absl import flags
+
+FLAGS = flags.FLAGS
 
 
 def point_theta(theta, c1, c2):
@@ -90,13 +91,13 @@ def solve_fenics(params, boundary_points=64, resolution=12):
     return u
 
 
-if __name__ == "__main__":
-    c1 = -0.1
-    c2 = 0.1
-    args = parser.parse_args()
-    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
-    params = sample_params(jax.random.PRNGKey(0), args)
+def main(argv):
+    params = sample_params(jax.random.PRNGKey(0))
 
     u = solve_fenics(params)
     fa.plot(u, title="solution")
     plt.show()
+
+
+if __name__ == "__main__":
+    app.run(main)
