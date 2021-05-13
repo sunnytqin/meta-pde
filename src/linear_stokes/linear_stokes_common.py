@@ -107,7 +107,7 @@ def loss_stress_fn(field_fn, points_in_domain, params):
     ) * np.eye(2)
 
     div_gradu_plus_p = vmap_divergence_tensor(points_in_domain, gradu_plus_p_fn)
-    return (1.0 / PRESSURE_FACTOR) * np.mean(div_gradu_plus_p ** 2, axis=1)
+    return (1.0 / PRESSURE_FACTOR**2) * np.mean(div_gradu_plus_p ** 2, axis=1)
 
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):

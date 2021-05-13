@@ -36,6 +36,7 @@ parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
 parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
 parser.add_argument("--bc_scale", type=float, default=1e0, help="bc scale")
 parser.add_argument("--seed", type=int, default=0, help="set random seed")
+parser.add_argument("--num_holes", type=int, default=None, help="set num holes")
 
 
 def point_theta(theta, c1, c2, x0, y0, size):
@@ -76,7 +77,10 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         return on_boundary and fa.near(x[0], XMAX)
 
     def walls(x, on_boundary):
-        return on_boundary and not (fa.near(x[0], XMIN) or fa.near(x[0], XMAX))
+        return on_boundary and (
+            (fa.near(x[1], YMIN) or fa.near(x[1], YMAX)) or
+            (not(fa.near(x[0], XMIN) or fa.near(x[0], XMAX)))
+            )
 
     V_h = fa.VectorElement("CG", mesh.ufl_cell(), 2)
     Q_h = fa.FiniteElement("CG", mesh.ufl_cell(), 1)
@@ -100,7 +104,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     # fa.plot(lhs_u)
     # plt.show()
     # pdb.set_trace()
-    bc_in = fa.DirichletBC(V, lhs_u, inlet)
+    bc_in = fa.DirichletBC(V, lhs_expr, inlet)
     bc_out = fa.DirichletBC(Q, fa.Constant((0.0)), outlet)
     bc_walls = fa.DirichletBC(V, fa.Constant((0.0, 0.0)), walls)
     # bc_pressure = fa.DirichletBC(Q, fa.Constant((1.)), inlet)
@@ -108,14 +112,11 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     dx = fa.Measure("dx")
 
     # Define variational problem
-    u_p.vector().set_local(np.random.randn(len(u_p.vector())) * 1e-6)
+    #u_p.vector().set_local(np.random.randn(len(u_p.vector())) * 1e-6)
 
     F = (
         fa.inner(fa.grad(u), fa.grad(v)) * fa.dx
-        + PRESSURE_FACTOR
-        * p
-        * fa.div(v)
-        * fa.dx  # Pressure varies on 100x scale of velocity
+        + PRESSURE_FACTOR * p * fa.div(v) * fa.dx  # Pressure varies on 100x scale of velocity
         + q * fa.div(u) * fa.dx
     )
 
@@ -126,7 +127,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         solver_parameters={
             "newton_solver": {
                 "maximum_iterations": int(1000),
-                "relaxation_parameter": 0.3,
+                "relaxation_parameter": 0.8,
                 "linear_solver": "mumps",
             }
         },
@@ -149,6 +150,10 @@ if __name__ == "__main__":
 
     params = sample_params(jax.random.PRNGKey(args.seed), args)
     source_params, bc_params, per_hole_params, num_holes = params
+
+    if args.num_holes is not None:
+        num_holes = args.num_holes
+        params = (source_params, bc_params, per_hole_params, num_holes)
 
     print("params: ", params)
 
@@ -179,6 +184,7 @@ if __name__ == "__main__":
     plt.colorbar(clrs)
     plt.show()
 
+    plt.figure(figsize=(9, 3))
     plot_solution(u_p, params)
     plt.show()
 
