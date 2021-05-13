@@ -58,7 +58,6 @@ def main(arvg):
     if FLAGS.out_dir is None:
         FLAGS.out_dir = FLAGS.pde + "_nn_results"
 
-    pdb.set_trace()
     pde = get_pde(FLAGS.pde)
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
