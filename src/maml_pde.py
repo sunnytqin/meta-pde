@@ -49,6 +49,7 @@ flags.DEFINE_float("outer_lr", 1e-3, "outer learning rate")
 flags.DEFINE_float("inner_lr", 3e-5, "inner learning rate")
 flags.DEFINE_float("lr_inner_lr", 1.0 / 2, "lr for inner learning rate")
 flags.DEFINE_integer("inner_steps", 5, "num_inner_steps")
+flags.DEFINE_float("inner_grad_clip", 10., "inner grad clipping")
 
 flags.DEFINE_float("outer_loss_decay", 0.1, "0. = just take final loss. 1.=sum all")
 

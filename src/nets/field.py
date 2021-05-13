@@ -157,9 +157,11 @@ def nf_apply(
         a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
         if nonlinearity == np.sin:
             # omega0 in siren, hacked so we can choose to only do it on first layer
-            a = a * omega
-        x = nonlinearity(a)
-    out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init)
+            x = nonlinearity(a* omega)
+        else:
+            x = nonlinearity(a)
+    out = flax.nn.Dense(x, out_dim, bias_init=flax.nn.initializers.zeros)
+    out = flax.nn.Dense(out, out_dim, bias_init=flax.nn.initializers.zeros)
     return out  # dewhiten(out, mean_y, std_y)
 
 

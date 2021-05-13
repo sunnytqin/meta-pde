@@ -19,6 +19,10 @@ import jax.numpy as np
 
 import flax
 
+from absl import app
+from absl import flags
+
+FLAGS = flags.FLAGS
 
 # LeapDef contains algorithm-level parameters.
 # Think of constructing LeapDef as akin to passing args to the __init__ of a Trainer
@@ -67,6 +71,22 @@ def leap_inner_step(leap_def, key, opt, loss_fn, meta_grad_accum):
     loss_and_grad_fn = jax.value_and_grad(loss_fn, argnums=1, has_aux=True)
 
     (loss, aux), grad = loss_and_grad_fn(k1, opt.target)
+
+    grad_norm = np.sqrt(
+        jax.tree_util.tree_reduce(
+            lambda x, y: x + y,
+            jax.tree_util.tree_map(lambda x: np.sum(x ** 2), grad),
+        )
+    )
+    
+    grad = jax.lax.cond(
+        grad_norm > FLAGS.inner_grad_clip,
+        lambda gradient_tree: jax.tree_util.tree_map(
+            lambda x: FLAGS.inner_grad_clip * x / grad_norm, grad
+        ),
+        lambda gradient_tree: gradient_tree,
+        grad
+    )
     new_opt = opt.apply_gradient(grad)
 
     # inner optimization step done. now we update meta_grad_accum

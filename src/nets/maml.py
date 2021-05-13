@@ -18,8 +18,10 @@ import flax
 
 from jax.config import config
 
-config.update("jax_disable_jit", True)
+from absl import app
+from absl import flags
 
+FLAGS = flags.FLAGS
 
 # MamlDef contains algorithm-level parameters.
 # Think of constructing MamlDef as akin to passing args to the __init__ of a Trainer
@@ -45,7 +47,8 @@ MamlDef = namedtuple(
 )
 
 
-def maml_inner_step(key, opt, inner_loss_fn, inner_lr, softplus_lrs=False):
+def maml_inner_step(key, opt, inner_loss_fn, inner_lr,
+                    softplus_lrs=False):
     """Inner step of MAML single-task rollout. It's just SGD or some other optim.
 
     Args:
@@ -74,6 +77,21 @@ def maml_inner_step(key, opt, inner_loss_fn, inner_lr, softplus_lrs=False):
         )
     else:
         grad = jax.tree_util.tree_map(lambda g: g * maybe_softplus(inner_lr), grad)
+
+    grad_norm = np.sqrt(
+        jax.tree_util.tree_reduce(
+            lambda x, y: x + y,
+            jax.tree_util.tree_map(lambda x: np.sum(x ** 2), grad),
+        )
+    )
+    grad = jax.lax.cond(
+        grad_norm > FLAGS.inner_grad_clip,
+        lambda gradient_tree: jax.tree_util.tree_map(
+            lambda x: FLAGS.inner_grad_clip * x / grad_norm, grad
+        ),
+        lambda gradient_tree: gradient_tree,
+        grad
+    )
 
     new_opt = opt.apply_gradient(grad)
     return new_opt, loss

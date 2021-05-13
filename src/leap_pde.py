@@ -43,10 +43,12 @@ from absl import flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 16, "batch size (in tasks)")
-flags.DEFINE_float("outer_lr", 1e-3, "outer learning rate")
+flags.DEFINE_float("outer_lr", 1e-4, "outer learning rate")
 
-flags.DEFINE_float("inner_lr", 3e-5, "inner learning rate")
-flags.DEFINE_integer("inner_steps", 5, "num_inner_steps")
+flags.DEFINE_float("inner_lr", 1e-5, "inner learning rate")
+flags.DEFINE_float("inner_grad_clip", 1., "inner grad clipping")
+
+flags.DEFINE_integer("inner_steps", 10, "num_inner_steps")
 
 
 def main(argv):
@@ -160,8 +162,6 @@ def main(argv):
             leap_def, jax.random.PRNGKey(0), model,
         )
         return losses
-
-    assert FLAGS.n_eval % 2 == 0
 
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 

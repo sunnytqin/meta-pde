@@ -42,9 +42,8 @@ def loss_fn(potential_fn, points, params):
     return {"boundary_loss": loss_on_boundary}, {"domain_loss": loss_in_domain}
 
 
-@partial(jax.jit, static_argnums=(1,))
+@jax.jit
 def sample_params(key):
-
     if FLAGS.fixed_num_pdes is not None:
         key = jax.random.PRNGKey(
             jax.random.randint(
