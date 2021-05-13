@@ -51,7 +51,7 @@ def main(argv):
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
 
-    log(str(FLAGS))
+    log(FLAGS.flags_into_string())
 
     # --------------------- Defining the training algorithm --------------------
 
