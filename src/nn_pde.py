@@ -75,7 +75,12 @@ parser.add_argument("--bc_weight", type=float, default=100.0, help="weight on bc
 parser.add_argument(
     "--grad_clip", type=float, default=None, help="max grad for clipping"
 )
-
+parser.add_argument(
+    "--siren_omega", type=float, default=1.0, help="siren omega scale"
+)
+parser.add_argument(
+    "--siren_omega0", type=float, default=3.0, help="siren omega0 scale"
+)
 parser.add_argument(
     "--bc_scale", type=float, default=1.0, help="scale on random uniform bc"
 )
@@ -183,6 +188,8 @@ if __name__ == "__main__":
         sizes=[args.layer_size for _ in range(args.num_layers)],
         dense_args=(),
         nonlinearity=np.sin if args.siren else nn.swish,
+        omega=args.siren_omega,
+        omega0=args.siren_omega0,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
@@ -353,14 +360,14 @@ if __name__ == "__main__":
             )
 
             if np.isfinite(grad_norm):
+                if args.grad_clip is not None and grad_norm > args.grad_clip:
+                    log("clipping gradients with norm {}".format(grad_norm))
+                    batch_grad = jax.tree_util.tree_map(
+                        lambda x: args.grad_clip * x / grad_norm, batch_grad
+                    )
                 if args.optimizer == "adahessian":
                     optimizer = optimizer.apply_gradient(batch_grad, batch_hess)
                 else:
-                    if args.grad_clip is not None and grad_norm > args.grad_clip:
-                        log("clipping gradients with norm {}".format(grad_norm))
-                        batch_grad = jax.tree_util.tree_map(
-                            lambda x: args.grad_clip * x / grad_norm, batch_grad
-                        )
                     optimizer = optimizer.apply_gradient(batch_grad)
             else:
                 log("NaN grad!")

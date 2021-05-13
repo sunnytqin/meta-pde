@@ -10,26 +10,27 @@ from flax import nn
 from functools import partial
 import pdb
 
-OMEGA = 10.0
-OMEGA0 = 10.0
+
+def siren_init(omega):
+    def init_fn(key, shape, dtype=np.float32, omega=omega):
+        fan_in = shape[0]
+        return jax.random.uniform(
+            key,
+            shape,
+            dtype,
+            -np.sqrt(6.0 / fan_in) / omega,
+            np.sqrt(6.0 / fan_in) / omega,
+        )
+    return init_fn
 
 
-def siren_init(key, shape, dtype=np.float32):
-    fan_in = shape[0]
-    return jax.random.uniform(
-        key,
-        shape,
-        dtype,
-        -np.sqrt(6.0 / fan_in) / OMEGA,
-        np.sqrt(6.0 / fan_in) / OMEGA,
-    )
-
-
-def first_layer_siren_init(key, shape, dtype=np.float32):
-    fan_in = shape[0]
-    return (OMEGA0 / OMEGA) * jax.random.uniform(
-        key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in
-    )
+def first_layer_siren_init(omega, omega0):
+    def init_fn(key, shape, dtype=np.float32, omega=omega, omega0=omega0):
+        fan_in = shape[0]
+        return (omega0 / omega) * jax.random.uniform(
+            key, shape, dtype, -1.0 / fan_in, 1.0 / fan_in
+        )
+    return init_fn
 
 
 def vmap_laplace_operator(x, potential_fn, weighting_fn=lambda x: 1.0):
@@ -136,11 +137,12 @@ def nf_apply(
     mean_y=None,
     std_y=None,
     n_fourier=None,
+    omega=30.,
+    omega0=30.,
 ):
     if nonlinearity == np.sin:
-        kernel_init = siren_init
-        first_init = first_layer_siren_init
-        assert n_fourier is None
+        kernel_init = siren_init(omega)
+        first_init = first_layer_siren_init(omega, omega0)
     else:
         kernel_init = flax.nn.initializers.variance_scaling(
             1.0, "fan_in", "truncated_normal"
@@ -153,7 +155,7 @@ def nf_apply(
         a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
         if nonlinearity == np.sin:
             # omega0 in siren, hacked so we can choose to only do it on first layer
-            a = a * OMEGA
+            a = a * omega
         x = nonlinearity(a)
     out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init)
     return out  # dewhiten(out, mean_y, std_y)
@@ -162,27 +164,13 @@ def nf_apply(
 class NeuralField2d(nn.Module):
     def apply(
         self,
-        x,
-        sizes,
-        dense_args=(),
-        nonlinearity=nn.relu,
-        mean_x=None,
-        std_x=None,
-        mean_y=None,
-        std_y=None,
-        n_fourier=None,
+        *args,
+        **kwargs,
     ):
         return nf_apply(
             x.shape[-1],
-            x,
-            sizes,
-            dense_args,
-            nonlinearity,
-            mean_x,
-            std_x,
-            mean_y,
-            std_y,
-            n_fourier,
+            *args,
+            **kwargs,
         )
 
 
@@ -192,27 +180,13 @@ NeuralField = NeuralField2d
 class NeuralField1d(nn.Module):
     def apply(
         self,
-        x,
-        sizes,
-        dense_args=(),
-        nonlinearity=nn.relu,
-        mean_x=None,
-        std_x=None,
-        mean_y=None,
-        std_y=None,
-        n_fourier=None,
+        *args,
+        **kwargs,
     ):
         return nf_apply(
             1,
-            x,
-            sizes,
-            dense_args,
-            nonlinearity,
-            mean_x,
-            std_x,
-            mean_y,
-            std_y,
-            n_fourier,
+            *args,
+            **kwargs,
         ).sum(axis=-1)
 
 
@@ -220,27 +194,13 @@ def make_nf_ndim(n_dims):
     class HigherDimNeuralField(nn.Module):
         def apply(
             self,
-            x,
-            sizes,
-            dense_args=(),
-            nonlinearity=nn.relu,
-            mean_x=None,
-            std_x=None,
-            mean_y=None,
-            std_y=None,
-            n_fourier=None,
+            *args,
+            **kwargs,
         ):
             return nf_apply(
                 n_dims,
-                x,
-                sizes,
-                dense_args,
-                nonlinearity,
-                mean_x,
-                std_x,
-                mean_y,
-                std_y,
-                n_fourier,
+                *args,
+                **kwargs,
             )
 
     return HigherDimNeuralField
