@@ -15,16 +15,19 @@ import fenics as fa
 from . import jax_tools
 
 
-def get_ground_truth_points(args, pde, pde_params_list, key):
+def get_ground_truth_points(args, pde, pde_params_list, key,
+                            resolution=None,
+                            boundary_points=None):
     """Given a pdedef and list of pde parameters, sample points in the domain and
     evaluate the ground truth at those points."""
     fenics_functions = []
     coefs = []
     coords = []
     keys = jax.random.split(key, len(pde_params_list))
-    for params, key in zip(pde_params_list, keys):
-        ground_truth = pde.solve_fenics(params)
-        ground_truth.set_allow_extrapolation(True)
+    for i, (params, key) in enumerate(zip(pde_params_list, keys)):
+        ground_truth = pde.solve_fenics(params,
+                                        resolution=resolution,
+                                        boundary_points=boundary_points)
         fn_coords = pde.sample_points_in_domain(key, args.validation_points, params)
         coefs.append(np.array([ground_truth(x) for x in fn_coords]))
         coords.append(fn_coords)
@@ -115,3 +118,31 @@ def compare_plots_with_ground_truth(
             plt.axis("off")
             if i == 0:
                 plt.ylabel("Model: {} steps".format(j))
+
+
+def prepare_logging(args):
+    if args.expt_name is not None:
+        if not os.path.exists(args.out_dir):
+            os.mkdir(args.out_dir)
+        path = os.path.join(args.out_dir, args.expt_name)
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+        outfile = open(os.path.join(path, "log.txt"), "w")
+
+        def log(*args, **kwargs):
+            print(*args, **kwargs, flush=True)
+            print(*args, **kwargs, file=outfile, flush=True)
+
+        tflogger = TFLogger(path)
+
+    else:
+
+        def log(*args, **kwargs):
+            print(*args, **kwargs, flush=True)
+
+        tflogger = None
+
+    return path, log, tflogger

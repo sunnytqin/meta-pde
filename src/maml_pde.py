@@ -118,29 +118,7 @@ if __name__ == "__main__":
 
     pde = get_pde(args.pde)
 
-    if args.expt_name is not None:
-        if not os.path.exists(args.out_dir):
-            os.mkdir(args.out_dir)
-        path = os.path.join(args.out_dir, args.expt_name)
-        if os.path.exists(path):
-            shutil.rmtree(path)
-        if not os.path.exists(path):
-            os.mkdir(path)
-
-        outfile = open(os.path.join(path, "log.txt"), "w")
-
-        def log(*args, **kwargs):
-            print(*args, **kwargs, flush=True)
-            print(*args, **kwargs, file=outfile, flush=True)
-
-        tflogger = TFLogger(path)
-
-    else:
-
-        def log(*args, **kwargs):
-            print(*args, **kwargs, flush=True)
-
-        tflogger = None
+    path, log, tflogger = trainer_util.prepare_logging(args)
 
     log(str(args))
 
