@@ -15,7 +15,7 @@ flags.DEFINE_string("expt_name", "default", "expt name")
 # PDE
 flags.DEFINE_string("pde", "poisson", "which PDE")
 flags.DEFINE_integer(
-    "ground_truth_resolution", 10, "mesh resolution for fenics ground truth"
+    "ground_truth_resolution", 20, "mesh resolution for fenics ground truth"
 )
 flags.DEFINE_float(
     "boundary_resolution_factor",
@@ -54,5 +54,7 @@ flags.DEFINE_float("siren_omega0", 3.0, "siren_omega0")
 
 flags.DEFINE_integer("viz_every", int(1e5), "plot every N steps")
 flags.DEFINE_integer("val_every", int(1e2), "validate every N steps")
-flags.DEFINE_integer("log_every", int(1e2), "tflog every N steps")
-flags.DEFINE_integer("measure_grad_norm_every", int(1e3), "")
+flags.DEFINE_integer("log_every", int(1e3), "tflog every N steps")
+flags.DEFINE_integer("measure_grad_norm_every", int(1e4), "")
+
+flags.DEFINE_string("optimizer", "ranger", help="adam or ranger, currently no adahess")

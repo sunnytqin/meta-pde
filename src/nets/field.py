@@ -167,9 +167,9 @@ def nf_apply(
 
 class NeuralField2d(nn.Module):
     def apply(
-        self, *args, **kwargs,
+        self, x, *args, **kwargs,
     ):
-        return nf_apply(x.shape[-1], *args, **kwargs,)
+        return nf_apply(x.shape[-1], x, *args, **kwargs,)
 
 
 NeuralField = NeuralField2d
@@ -190,6 +190,28 @@ def make_nf_ndim(n_dims):
             return nf_apply(n_dims, *args, **kwargs,)
 
     return HigherDimNeuralField
+
+
+class DivFreeVelocityPressureField(nn.Module):
+    def apply(
+        self, x, *args, **kwargs,
+    ):
+        x_shape = x.shape
+        x = x.reshape(-1, 2)
+
+        base_field = NeuralField2d.shared(**kwargs)
+
+        def phi_and_p_fn(x_):
+            phi_p = base_field(x_)
+            return np.sum(phi_p[:, 0]), phi_p[:, 1]
+
+        gradphi, pressure = jax.grad(phi_and_p_fn, has_aux=True)(x)
+
+        vel_x = gradphi[:, 1]
+        vel_y = -gradphi[:, 0]
+
+        return np.stack((vel_x, vel_y, pressure), axis=1).reshape((*x_shape[:-1], 3))
+
 
 
 NeuralPotential = NeuralField1d

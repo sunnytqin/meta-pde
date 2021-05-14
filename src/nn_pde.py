@@ -24,6 +24,8 @@ from .util import jax_tools
 
 from .util import trainer_util
 
+import time
+
 import matplotlib.pyplot as plt
 import pdb
 import sys
@@ -40,7 +42,6 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 1, "batch size (in tasks)")
 flags.DEFINE_float("outer_lr", 1e-5, "outer learning rate")
-flags.DEFINE_string("optimizer", "adam", help="adam or ranger or adahessian")
 
 
 def main(argv):
@@ -206,6 +207,8 @@ def main(argv):
 
     # --------------------- Run MAML --------------------
 
+    time_last_log = time.time()
+
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
@@ -223,7 +226,7 @@ def main(argv):
             loss_vals_and_grad_norms = get_grad_norms(subkey, optimizer.target)
             loss_vals_and_grad_norms = {k: (float(v[0]), float(v[1]))
                                         for k, v in loss_vals_and_grad_norms.items()}
-            print("loss vals and grad norms: ", loss_vals_and_grad_norms)
+            log("loss vals and grad norms: ", loss_vals_and_grad_norms)
             if tflogger is not None:
                 for k in loss_vals_and_grad_norms:
                     tflogger.log_scalar(
@@ -284,6 +287,11 @@ def main(argv):
             val_loss = validation_losses(optimizer.target)
 
         if step % FLAGS.log_every == 0:
+            if step > 0:
+                log("time {} steps: {}".format(FLAGS.log_every,
+                                               time.time() - time_last_log))
+            time_last_log = time.time()
+
             log(
                 "step: {}, loss: {}, val_loss: {}, val_rmse: {}, "
                 "val_rel_err: {}, val_true_norms: {}, "
@@ -299,6 +307,7 @@ def main(argv):
                     t.interval,
                 )
             )
+
 
             if tflogger is not None:
                 # A lot of these names have unnecessary "meta_"
@@ -325,6 +334,10 @@ def main(argv):
 
                     for k, v in jax_tools.dict_flatten(optimizer.target.params):
                         tflogger.log_histogram("Param: " + k, v.flatten(), step)
+
+            log("time for logging {}".format(time.time() - time_last_log))
+            time_last_log = time.time()
+
 
         if FLAGS.viz_every > 0 and step % FLAGS.viz_every == 0:
             plt.figure()

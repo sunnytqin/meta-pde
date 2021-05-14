@@ -174,18 +174,20 @@ def prepare_logging(out_dir, expt_name):
 
 def get_optimizer(model_class, init_params):
     if FLAGS.optimizer == "adam":
-        optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta2=0.98).create(
+        optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta2=0.99).create(
             flax.nn.Model(model_class, init_params)
         )
     elif FLAGS.optimizer == "ranger":
         optimizer = flaxOptimizers.Ranger(
-            learning_rate=FLAGS.outer_lr, beta2=0.98, use_gc=False
+            learning_rate=FLAGS.outer_lr, beta2=0.99, use_gc=False
         ).create(flax.nn.Model(model_class, init_params))
 
     elif FLAGS.optimizer == "adahessian":
-        optimizer = Adahessian(learning_rate=FLAGS.outer_lr, beta2=0.95).create(
-            flax.nn.Model(model_class, init_params)
-        )
+        raise Exception("Adahessian currently doesnt work with jitting whole train "
+                        "loop or with maml/leap")
+        #optimizer = Adahessian(learning_rate=FLAGS.outer_lr, beta2=0.95).create(
+        #    flax.nn.Model(model_class, init_params)
+        #)
     else:
         raise Exception("unknown optimizer: ", FLAGS.optimizer)
 

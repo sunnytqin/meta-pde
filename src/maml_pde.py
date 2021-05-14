@@ -36,6 +36,8 @@ import shutil
 from copy import deepcopy
 from collections import namedtuple
 
+import time
+
 from .util import common_flags
 
 from absl import app
@@ -49,7 +51,7 @@ flags.DEFINE_float("outer_lr", 1e-3, "outer learning rate")
 flags.DEFINE_float("inner_lr", 3e-5, "inner learning rate")
 flags.DEFINE_float("lr_inner_lr", 1.0 / 2, "lr for inner learning rate")
 flags.DEFINE_integer("inner_steps", 5, "num_inner_steps")
-flags.DEFINE_float("inner_grad_clip", 10., "inner grad clipping")
+flags.DEFINE_float("inner_grad_clip", 1e14, "inner grad clipping")
 
 flags.DEFINE_float("outer_loss_decay", 0.1, "0. = just take final loss. 1.=sum all")
 
@@ -110,9 +112,8 @@ def main(arvg):
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-    optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta2=0.98).create(
-        flax.nn.Model(Field, init_params)
-    )
+
+    optimizer = trainer_util.get_optimizer(Field, init_params)
 
     inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(FLAGS.lr_inner_lr)
 
@@ -220,6 +221,7 @@ def main(arvg):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
+    time_last_log = time.time()
     # --------------------- Run MAML --------------------
 
     for step in range(FLAGS.outer_steps):
@@ -228,10 +230,8 @@ def main(arvg):
         with Timer() as t:
             (optimizer, inner_lr_state, losses,
              meta_losses, meta_grad_norm) = train_step(
-                 step, subkey, optimizer, inner_lr_state
-             )
-
-        inner_lrs = inner_lr_get(inner_lr_state)
+                 step, subkey, optimizer, inner_lr_state)
+            inner_lrs = inner_lr_get(inner_lr_state)
 
         if step % FLAGS.val_every == 0:
             val_error, per_dim_val_error = vmap_validation_error(
@@ -256,6 +256,10 @@ def main(arvg):
                     subkey,
                 )
             )
+            if step > 0:
+                log("time {} steps: {}".format(FLAGS.log_every,
+                                               time.time() - time_last_log))
+                time_last_log = time.time()
             log(
                 "meta_loss_max: {}, meta_loss_min: {}, meta_loss_std: {}".format(
                     np.max(meta_losses[0]), np.min(meta_losses[0]), np.std(meta_losses[0])

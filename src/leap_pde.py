@@ -34,6 +34,8 @@ import shutil
 from copy import deepcopy
 from collections import namedtuple
 
+import time
+
 
 from .util import common_flags
 
@@ -46,7 +48,7 @@ flags.DEFINE_integer("bsize", 16, "batch size (in tasks)")
 flags.DEFINE_float("outer_lr", 1e-4, "outer learning rate")
 
 flags.DEFINE_float("inner_lr", 1e-5, "inner learning rate")
-flags.DEFINE_float("inner_grad_clip", 1., "inner grad clipping")
+flags.DEFINE_float("inner_grad_clip", 1e14, "inner grad clipping")
 
 flags.DEFINE_integer("inner_steps", 10, "num_inner_steps")
 
@@ -104,9 +106,8 @@ def main(argv):
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-    optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr).create(
-        flax.nn.Model(Field, init_params)
-    )
+
+    optimizer = trainer_util.get_optimizer(Field, init_params)
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -196,6 +197,8 @@ def main(argv):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
+    time_last_log = time.time()
+
     # --------------------- Run LEAP --------------------
 
     for step in range(FLAGS.outer_steps):
@@ -223,6 +226,10 @@ def main(argv):
                     t.interval,
                 )
             )
+            if step > 0:
+                log("time {} steps: {}".format(FLAGS.log_every,
+                                               time.time() - time_last_log))
+                time_last_log = time.time()
             log(
                 "meta_loss_max: {}, meta_loss_min: {}, meta_loss_std: {}".format(
                     np.max(losses[0][:, -1]),
