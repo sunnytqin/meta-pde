@@ -18,9 +18,6 @@ from absl import flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_float("bc_scale", 0.2, "scale on random uniform bc")
-flags.DEFINE_float("bc_weight", 10.0, "weight on bc loss")
-
 
 def plot_solution(u, params):
     fa.plot(u)

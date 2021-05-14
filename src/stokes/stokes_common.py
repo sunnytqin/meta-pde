@@ -24,7 +24,7 @@ from ..util import common_flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_float("bc_scale", 1.0, "scale on random uniform bc")
+
 flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
@@ -32,7 +32,6 @@ flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("pressure_factor", 1.0, "scale on random uniform bc")
 flags.DEFINE_integer("max_holes", 3, "scale on random uniform bc")
 flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
-flags.DEFINE_float("bc_weight", 100.0, "weight on bc loss")
 
 flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
 

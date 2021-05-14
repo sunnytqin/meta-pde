@@ -11,6 +11,8 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("out_dir", None, "out directory")
 flags.DEFINE_string("expt_name", "default", "expt name")
 
+flags.DEFINE_float("bc_scale", 1.0, "scale on random uniform bc")
+flags.DEFINE_float("bc_weight", 100.0, "weight on bc loss")
 
 flags.DEFINE_float(
     "relaxation_parameter",
