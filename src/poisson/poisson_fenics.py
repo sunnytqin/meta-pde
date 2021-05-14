@@ -45,7 +45,7 @@ def point_theta(theta, c1, c2):
 
 
 def make_domain(c1, c2, n_points):
-    thetas = np.linspace(0.0, 1.0, n_points) * 2 * np.pi
+    thetas = np.linspace(0.0, 1.0, n_points, endpoint=False) * 2 * np.pi
     points = [point_theta(t, c1, c2) for t in thetas]
     return mshr.Polygon(points)
 

@@ -35,16 +35,25 @@ def point_theta(theta, c1, c2, x0, y0, size):
     r0 = size * (1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta))
     x = r0 * np.cos(theta)
     y = r0 * np.sin(theta)
-    return fa.Point(np.array([x + x0, y + y0]))
+    return [x + x0, y + y0]
 
 
 def make_domain(c1, c2, n_points, x0, y0, size):
-    thetas = np.linspace(0.0, 1.0, n_points) * 2 * np.pi
-    points = [point_theta(t, c1, c2, x0, y0, size) for t in thetas]
-    return mshr.Polygon(points)
+    try:
+        thetas = np.linspace(0.0, 1.0, n_points, endpoint=False) * 2 * np.pi
+        points = [point_theta(t, c1, c2, x0, y0, size) for t in thetas]
+        # print(points)
+        domain = mshr.Polygon([fa.Point(p) for p in points])
+        return domain
+    except Exception as e:
+        print("error constructing domain")
+        print("params: ", (c1, c2, n_points, x0, y0, size))
+        pdb.set_trace()
 
 
 def solve_fenics(params, boundary_points=32, resolution=32):
+    print("solving with params ", params)
+    print("resolution ", resolution)
     domain = mshr.Rectangle(
         fa.Point([FLAGS.xmin, FLAGS.ymin]), fa.Point([FLAGS.xmax, FLAGS.ymax]),
     )
@@ -148,7 +157,6 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         print("Failed on params: ", params)
         fa.plot(mesh)
         plt.show()
-        pdb.set_trace()
 
     return u_p
 

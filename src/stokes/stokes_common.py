@@ -168,7 +168,7 @@ def sample_params(key):
             )[0]
         )
 
-    k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
+    k1, k2, k3, k4, k5, k6, k7 = jax.random.split(key, 7)
 
     # These keys will all be 0 if we're not varying that factor
     k1 = k1 * FLAGS.vary_source
@@ -177,6 +177,8 @@ def sample_params(key):
     k4 = k4 * FLAGS.vary_geometry
     k5 = k5 * FLAGS.vary_geometry
     k6 = k6 * FLAGS.vary_geometry
+    k7 = k7 * FLAGS.vary_geometry
+
 
     source_params = jax.random.uniform(k1, shape=(2,), minval=1 / 4, maxval=3.0 / 4)
 
@@ -201,24 +203,39 @@ def sample_params(key):
 
     min_step = FLAGS.max_hole_size
 
-    xlow = FLAGS.xmin + 1.5 * FLAGS.max_hole_size
-    xhigh = FLAGS.xmax - 1.5 * FLAGS.max_hole_size
-    ylow = FLAGS.ymin + 1.5 * FLAGS.max_hole_size
-    yhigh = FLAGS.ymax - 1.5 * FLAGS.max_hole_size
+    xlow = FLAGS.xmin + 1.5 * FLAGS.max_hole_size / 2
+    xhigh = FLAGS.xmax - 1.5 * FLAGS.max_hole_size / 2
+    ylow = FLAGS.ymin + 1.5 * FLAGS.max_hole_size / 2
+    yhigh = FLAGS.ymax - 1.5 * FLAGS.max_hole_size / 2
+    nx = int((xhigh-xlow)/(1.5*FLAGS.max_hole_size))+1
+    ny = int((yhigh-ylow)/(1.5*FLAGS.max_hole_size))+1
+
+    xlow = FLAGS.xmin + 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
+    xhigh = FLAGS.xmax - 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
+    ylow = FLAGS.ymin + 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
+    yhigh = FLAGS.ymax - 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
 
     possible_xs = np.linspace(xlow,
                               xhigh,
-                              int((xhigh-xlow)//(1.1*FLAGS.max_hole_size/2))+1,
+                              nx,
                               endpoint=True)
     possible_ys = np.linspace(ylow,
                               yhigh,
-                              int((yhigh-ylow)//(1.1*FLAGS.max_hole_size/2))+1,
+                              ny,
                               endpoint=True)
-    xys = np.stack([possible_xs, possible_ys], axis=1)
+    xv, yv = np.meshgrid(possible_xs, possible_ys)
+    possible_xys = np.stack([xv.flatten(), yv.flatten()], axis=1)
 
-    idxs = jax.random.choice(k5, xys.shape[0], shape=(FLAGS.max_holes,),
+    idxs = jax.random.choice(k5, possible_xys.shape[0], shape=(FLAGS.max_holes,),
                              replace=False)
-    pore_x0y0 = xys[idxs]
+    pore_x0y0 = possible_xys[idxs]
+
+    jitter = jax.random.uniform(k7,
+                                minval=-0.25*FLAGS.max_hole_size,
+                                maxval=0.25*FLAGS.max_hole_size,
+                                shape=pore_x0y0.shape)
+
+    pore_x0y0 = pore_x0y0 + jitter
 
     per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
 

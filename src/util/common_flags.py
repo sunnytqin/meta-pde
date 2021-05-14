@@ -14,12 +14,12 @@ flags.DEFINE_string("expt_name", "default", "expt name")
 
 flags.DEFINE_float(
     "relaxation_parameter",
-    0.3,
+    0.1,
     "Newton solver relaxation parameter",
 )
 flags.DEFINE_integer(
     "max_newton_steps",
-    250,
+    500,
     "Newton solver max steps",
 )
 

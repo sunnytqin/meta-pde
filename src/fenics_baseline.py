@@ -35,7 +35,7 @@ FLAGS = flags.FLAGS
 # parser = argparse.ArgumentParser()
 flags.DEFINE_string(
     "test_resolutions",
-    "1,2,4,6,10,16",
+    "1,2,4,6,9,12",
     "mesh resolutions for fenics baseline. expect comma sep ints",
 )
 
