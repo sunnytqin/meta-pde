@@ -22,6 +22,7 @@ from absl import app
 from absl import flags
 from ..util import common_flags
 
+FLAGS = flags.FLAGS
 
 flags.DEFINE_float("bc_scale", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
