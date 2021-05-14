@@ -209,10 +209,10 @@ def sample_params(key):
     nx = int((xhigh-xlow)/(1.5*FLAGS.max_hole_size))+1
     ny = int((yhigh-ylow)/(1.5*FLAGS.max_hole_size))+1
 
-    xlow = FLAGS.xmin + 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
-    xhigh = FLAGS.xmax - 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
-    ylow = FLAGS.ymin + 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
-    yhigh = FLAGS.ymax - 1.5 * FLAGS.max_hole_size / np.min([n_holes, 2])
+    xlow = FLAGS.xmin + 1.5 * FLAGS.max_hole_size / np.min(np.array([n_holes, 2]))
+    xhigh = FLAGS.xmax - 1.5 * FLAGS.max_hole_size / np.min(np.array([n_holes, 2]))
+    ylow = FLAGS.ymin + 1.5 * FLAGS.max_hole_size / np.min(np.array([n_holes, 2]))
+    yhigh = FLAGS.ymax - 1.5 * FLAGS.max_hole_size / np.min(np.array([n_holes, 2]))
 
     possible_xs = np.linspace(xlow,
                               xhigh,
