@@ -1,7 +1,7 @@
 """
-    Solve the nonlinear Stokes equation using fenics
+    Solve the linear Stokes equation using fenics
 
-    PDE: https://www.osti.gov/servlets/purl/1090851, section 2.3
+    PDE: https://fenicsproject.org/olddocs/dolfin/1.3.0/python/demo/documented/stokes-iterative/python/documentation.html
 """
 
 import fenics as fa
@@ -13,7 +13,13 @@ import argparse
 import jax
 from collections import namedtuple
 
-from .nonlinear_stokes_common import (
+from absl import app
+from absl import flags
+from ..util import common_flags
+
+FLAGS = flags.FLAGS
+
+from .stokes_common import (
     plot_solution,
     loss_fn,
     fenics_to_jax,
@@ -22,19 +28,7 @@ from .nonlinear_stokes_common import (
     sample_params,
     sample_points,
     is_in_hole,
-    XMIN,
-    XMAX,
-    YMIN,
-    YMAX,
 )
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--bc_scale", type=float, default=1e4, help="bc scale")
-parser.add_argument("--seed", type=int, default=0, help="set random seed")
 
 
 def point_theta(theta, c1, c2, x0, y0, size):
@@ -52,7 +46,7 @@ def make_domain(c1, c2, n_points, x0, y0, size):
 
 def solve_fenics(params, boundary_points=32, resolution=32):
     domain = mshr.Rectangle(
-        fa.Point(np.array([XMIN, YMIN])), fa.Point(np.array([XMAX, YMAX]))
+        fa.Point([FLAGS.xmin, FLAGS.ymin]), fa.Point([FLAGS.xmax, FLAGS.ymax]),
     )
     source_params, bc_params, per_hole_params, n_holes = params
     # pdb.set_trace()
@@ -60,19 +54,25 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         make_domain(c1, c2, boundary_points, x0, y0, size)
         for c1, c2, x0, y0, size in per_hole_params[:n_holes]
     ]
-    obstacle = holes[0]
-    for o2 in holes[1:]:
-        obstacle = obstacle + o2
-
-    domain = domain - obstacle
+    if n_holes > 0:
+        obstacle = holes[0]
+        for o2 in holes[1:]:
+            obstacle = obstacle + o2
+        domain = domain - obstacle
 
     mesh = mshr.generate_mesh(domain, resolution)
 
     def inlet(x, on_boundary):
-        return on_boundary and (fa.near(x[0], XMIN) or fa.near(x[0], XMAX))
+        return on_boundary and fa.near(x[0], FLAGS.xmin)
+
+    def outlet(x, on_boundary):
+        return on_boundary and fa.near(x[0], FLAGS.xmax)
 
     def walls(x, on_boundary):
-        return on_boundary
+        return on_boundary and (
+            (fa.near(x[1], FLAGS.ymin) or fa.near(x[1], FLAGS.ymax))
+            or (not (fa.near(x[0], FLAGS.xmin) or fa.near(x[0], FLAGS.xmax)))
+        )
 
     V_h = fa.VectorElement("CG", mesh.ufl_cell(), 2)
     Q_h = fa.FiniteElement("CG", mesh.ufl_cell(), 1)
@@ -85,7 +85,19 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     du_p = fa.TrialFunction(W)
 
     # Define function for setting Dirichlet values
-    bc_in_out = fa.DirichletBC(V, fa.Constant((float(bc_params[0]), 0.0)), inlet)
+    lhs_expr = fa.Expression(
+        ("A*sin(pi*(x[1]-ymin)/(ymax-ymin))", 0.0),
+        A=float(bc_params[0]),
+        ymax=FLAGS.ymax,
+        ymin=FLAGS.ymin,
+        element=V.ufl_element(),
+    )
+    lhs_u = fa.project(lhs_expr, fa.VectorFunctionSpace(mesh, "P", 2))
+    # fa.plot(lhs_u)
+    # plt.show()
+    # pdb.set_trace()
+    bc_in = fa.DirichletBC(V, lhs_expr, inlet)
+    bc_out = fa.DirichletBC(Q, fa.Constant((0.0)), outlet)
     bc_walls = fa.DirichletBC(V, fa.Constant((0.0, 0.0)), walls)
     # bc_pressure = fa.DirichletBC(Q, fa.Constant((1.)), inlet)
 
@@ -94,40 +106,42 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     # Define variational problem
     u_p.vector().set_local(np.random.randn(len(u_p.vector())) * 1e-6)
 
-    def strain_rate_fn(field):
-        return (fa.grad(field) + fa.grad(field).T) / 2
+    if FLAGS.stokes_nonlinear:
+        def strain_rate_fn(field):
+            return (fa.grad(field) + fa.grad(field).T) / 2
 
-    effective_sr = fa.sqrt(0.5 * fa.inner(strain_rate_fn(u), strain_rate_fn(u)))
+        effective_sr = fa.sqrt(0.5 * fa.inner(strain_rate_fn(u), strain_rate_fn(u)))
 
-    mu_fn = float(source_params[0]) * effective_sr ** float(-source_params[1])
+        mu_fn = float(source_params[0]) * effective_sr ** float(-source_params[1])
 
-    F = (
-        2 * mu_fn * fa.inner(strain_rate_fn(u), strain_rate_fn(v)) * fa.dx
-        - p * fa.div(v) * fa.dx
-        + q * fa.div(u) * fa.dx
-    )
+        F = (
+            2 * mu_fn * fa.inner(strain_rate_fn(u), strain_rate_fn(v)) * fa.dx
+            - p * fa.div(v) * fa.dx
+            + q * fa.div(u) * fa.dx
+        )
+
+    else:
+        F = (
+            fa.inner(fa.grad(u), fa.grad(v)) * fa.dx
+            - FLAGS.pressure_factor
+            * p
+            * fa.div(v)
+            * fa.dx  # Pressure varies on 100x scale of velocity
+            + q * fa.div(u) * fa.dx
+        )
 
     fa.solve(
         F == 0,
         u_p,
-        [bc_walls, bc_in_out],
+        [bc_walls, bc_in, bc_out],
         solver_parameters={
             "newton_solver": {
                 "maximum_iterations": int(1000),
-                "relaxation_parameter": 0.3,
+                "relaxation_parameter": 0.8,
                 "linear_solver": "mumps",
             }
         },
     )
-
-    # Enforce zero mean pressure
-    u1, p1 = fa.split(fa.interpolate(fa.Constant((1.0, 1.0, 1.0)), W))
-
-    mean_pressure = fa.assemble(p * fa.dx) / fa.assemble(p1 * fa.dx)
-
-    # Every point is a weighted sum of coefs with weight ssumming to 1,
-    # so just subtract mean pressure from all the coefs corresponding to pressure
-    u_p.vector()[W.sub(1).dofmap().dofs()] -= mean_pressure
 
     return u_p
 
@@ -140,27 +154,49 @@ def is_defined(xy, u):
     )
 
 
-if __name__ == "__main__":
-    args = parser.parse_args()
-    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
-
-    params = sample_params(jax.random.PRNGKey(args.seed), args)
+def main(argv):
+    params = sample_params(jax.random.PRNGKey(FLAGS.seed))
     source_params, bc_params, per_hole_params, num_holes = params
+
     print("params: ", params)
 
     u_p = solve_fenics(params)
 
     x = np.array(u_p.function_space().tabulate_dof_coordinates()[:100])
 
-    points = sample_points(jax.random.PRNGKey(args.seed + 1), 128, params)
-    points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
+    points = sample_points(jax.random.PRNGKey(FLAGS.seed + 1), 128, params)
 
+    normalizer = fa.assemble(
+        fa.project(
+            fa.Constant((1.0)), fa.FunctionSpace(u_p.function_space().mesh(), "P", 2)
+        )
+        * fa.dx
+    )
+    for i in range(3):
+        solution_dim_i = fa.inner(
+            u_p, fa.Constant((0.0 + i == 0, 0.0 + i == 1, 0.0 + i == 2))
+        )
+        print(
+            "norm in dim {}: ".format(i),
+            fa.assemble(fa.inner(solution_dim_i, solution_dim_i) * fa.dx) / normalizer,
+        )
+
+    u, p = u_p.split()
+    plt.figure(figsize=(9, 3))
+    clrs = fa.plot(p)
+    plt.colorbar(clrs)
+    plt.show()
+
+    plt.figure(figsize=(9, 3))
     plot_solution(u_p, params)
     plt.show()
 
     u, p = u_p.split()
     # plot solution
-    X, Y = np.meshgrid(np.linspace(XMIN, XMAX, 300), np.linspace(YMIN, YMAX, 100))
+    X, Y = np.meshgrid(
+        np.linspace(FLAGS.xmin, FLAGS.xmax, 300),
+        np.linspace(FLAGS.ymin, FLAGS.ymax, 100),
+    )
     Xflat, Yflat = X.reshape(-1), Y.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
@@ -174,7 +210,9 @@ if __name__ == "__main__":
     U = np.array([uv[0] for uv in UV]).reshape(X.shape)
     V = np.array([uv[1] for uv in UV]).reshape(Y.shape)
 
-    X_, Y_ = np.meshgrid(np.linspace(XMIN, XMAX, 60), np.linspace(YMIN, YMAX, 40))
+    X_, Y_ = np.meshgrid(
+        np.linspace(FLAGS.xmin, FLAGS.xmax, 60), np.linspace(FLAGS.ymin, FLAGS.ymax, 40)
+    )
     Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
@@ -186,7 +224,10 @@ if __name__ == "__main__":
     V_ = np.array([uv[1] for uv in UV_])
 
     plt.figure(figsize=(9, 3))
+    fa.plot(p)
+    plt.show()
 
+    plt.figure(figsize=(9, 3))
     parr = np.array([p([x, y]) for x, y in zip(Xflat_, Yflat_)])
     fa.plot(
         p,
@@ -204,7 +245,8 @@ if __name__ == "__main__":
     speed_ = np.linalg.norm(np.stack([U_, V_], axis=1), axis=1)
 
     seed_points = np.stack(
-        [XMIN * np.ones(40), np.linspace(YMIN + 0.1, YMAX - 0.1, 40)], axis=1
+        [FLAGS.xmin * np.ones(40), np.linspace(FLAGS.ymin + 0.1, FLAGS.ymax - 0.1, 40)],
+        axis=1,
     )
 
     plt.quiver(Xflat_, Yflat_, U_, V_, speed_ / speed_.max(), alpha=0.7)
@@ -215,8 +257,8 @@ if __name__ == "__main__":
         V,
         color=speed / speed.max(),
         start_points=seed_points,
-        density=100,
-        linewidth=0.3,
+        density=10,
+        linewidth=0.2,
         arrowsize=0.0,
     )  # , np.sqrt(U**2+V**2))
     # plt.scatter(X_[in_hole], Y_[in_hole], c='gray', s=0.1)
@@ -227,15 +269,26 @@ if __name__ == "__main__":
     fa.plot(u_p.function_space().mesh())
 
     plt.figure(figsize=(9, 3))
-    points_inlet, points_wall, points_pores, points_domain, = sample_points(
-        jax.random.PRNGKey(args.seed + 1), 1024, params
-    )
+    (
+        points_inlet,
+        points_outlet,
+        points_wall,
+        points_pores,
+        points_domain,
+    ) = sample_points(jax.random.PRNGKey(FLAGS.seed + 1), 1024, params)
 
     points_wall = np.concatenate([points_wall, points_pores])
 
     plt.scatter(points_wall[:, 0], points_wall[:, 1], color="g", alpha=0.5)
     plt.scatter(points_inlet[:, 0], points_inlet[:, 1], color="r", alpha=0.5)
+    plt.scatter(points_outlet[:, 0], points_outlet[:, 1], color="y", alpha=0.5)
 
     plt.scatter(points_domain[:, 0], points_domain[:, 1], color="b", alpha=0.5)
 
     plt.show()
+
+
+if __name__ == "__main__":
+    app.run(main)
+    args = parser.parse_args()
+    args = namedtuple("ArgsTuple", vars(args))(**vars(args))

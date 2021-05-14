@@ -14,9 +14,8 @@ import fenics as fa
 
 from .util.timer import Timer
 
-from .util import jax_tools
+from .util import jax_tools, trainer_util, common_flags
 
-from .util import trainer_util
 
 import matplotlib.pyplot as plt
 import pdb
@@ -68,7 +67,7 @@ def main(argv):
         ),
     )
 
-    test_resolutions = [int(s) for s in ",".split(FLAGS.test_resolutions)]
+    test_resolutions = [int(s) for s in FLAGS.test_resolutions.split(',')]
 
     def validation_error(
         ground_truth_vals, test_vals,
@@ -76,10 +75,10 @@ def main(argv):
         test_vals = test_vals.reshape(test_vals.shape[0], test_vals.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(test_vals.shape)
         err = test_vals - ground_truth_vals
-        gt_normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
-        test_normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
-
-        return (err ** 2, normalizer, test_normalizer)  # n_pdes x n_points x n_dims
+        gt_normalizer = np.mean(ground_truth_vals ** 2, axis=(1,2), keepdims=True)
+        test_normalizer = np.mean(ground_truth_vals ** 2, axis=(1,2), keepdims=True)
+        assert len(err.shape) == 3
+        return (err ** 2, gt_normalizer, test_normalizer)  # n_pdes x n_points x n_dims
 
     errs = {}
     times = {}
@@ -90,14 +89,23 @@ def main(argv):
                 pde,
                 jax_tools.tree_unstack(gt_params),
                 gt_points_key,
-                resolution=args.res,
+                resolution=res,
                 boundary_points=int(FLAGS.boundary_resolution_factor * res),
             )
         assert np.allclose(test_coords, coords)
-        errs[res] = npo.array(validation_error(ground_truth_vals, test_vals))
+        errs[res] = validation_error(gt_vals, test_vals)
         times[res] = t.interval / FLAGS.n_eval
 
     npo.save(os.path.join(path, "errors_by_resolution.npy"), (errs, times))
+
+    pdb.set_trace()
+
+    for res in test_resolutions:
+        print("res: {}, rel_mse: {}, std_rel_mse: {}, time: {}".format(
+            res, np.mean(errs[res][0]/errs[res][1]),
+            np.std(np.mean(errs[res][0]/errs[res][1], axis=(1,2))),
+            times[res]
+        ))
 
     pdb.set_trace()
 

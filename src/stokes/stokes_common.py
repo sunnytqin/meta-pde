@@ -18,23 +18,23 @@ from ..nets.field import (
 )
 from ..util.jax_tools import tree_unstack
 
-parser = argparse.ArgumentParser()
+from absl import app
+from absl import flags
+from ..util import common_flags
 
+FLAGS = flags.FLAGS
 
-XMIN = -1.0
-XMAX = 1.0
-YMIN = -1.0
-YMAX = 1.0
+flags.DEFINE_float("bc_scale", 1.0, "scale on random uniform bc")
+flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
+flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
+flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
+flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
+flags.DEFINE_float("pressure_factor", 1.0, "scale on random uniform bc")
+flags.DEFINE_integer("max_holes", 3, "scale on random uniform bc")
+flags.DEFINE_float("max_hole_size", 0.6, "scale on random uniform bc")
+flags.DEFINE_float("bc_weight", 100.0, "weight on bc loss")
 
-MAX_HOLES = 3
-
-MAX_SIZE = 0.6
-
-parser.add_argument("--vary_source", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_bc", type=int, default=1, help="1 for true")
-parser.add_argument("--vary_geometry", type=int, default=1, help="1=true.")
-parser.add_argument("--bc_scale", type=float, default=1e-2, help="bc scale")
-parser.add_argument("--seed", type=int, default=0, help="set random seed")
+flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
 
 
 def get_u(field_fn):
@@ -86,36 +86,47 @@ def deviatoric_stress(x, field_fn, source_params):
     return 2 * mu_fn * strain_rate
 
 
-def loss_fenics(u, params):
+def loss_divu_fn(field_fn, points_in_domain, params):
+    # force div(u) = 0
     source_params, bc_params, per_hole_params, n_holes = params
-    strain_rate = (fa.grad(u) + fa.grad(u).T) / 2
-    effective_sr = fa.sqrt(0.5 * fa.inner(strain_rate, strain_rate))
-    mu_fn = source_params[0] * effective_sr ** (-source_params[1])
-    dev_stress = 2 * mu_fn * strain_rate
+    div_u = vmap_divergence(points_in_domain, get_u(field_fn),)
+
+    return div_u ** 2
 
 
-def loss_domain_fn(field_fn, points_in_domain, params):
+def loss_stress_fn(field_fn, points_in_domain, params):
+    # force div(grad(u) - p * I) = 0
     source_params, bc_params, per_hole_params, n_holes = params
-    div_stress = vmap_divergence_tensor(
-        points_in_domain,
-        lambda x, field_fn=get_u(
-            field_fn
-        ), source_params=source_params: deviatoric_stress(x, field_fn, source_params),
-    )
 
-    grad_p = jax.vmap(lambda x: jax.grad(get_p(field_fn))(x))(points_in_domain)
+    if FLAGS.stokes_nonlinear:
+        deviatoric_stress_fn = lambda x: deviatoric_stress(
+            x, get_u(field_fn), source_params)
+        grad_p = jax.grad(get_p(field_fn))
 
-    err_in_domain = grad_p - div_stress
-    return err_in_domain ** 2
+        err = vmap_divergence_tensor(points_in_domain, deviatoric_stress_fn) - grad_p(
+            points_in_domain
+        )
+
+    else:
+        gradu_fn = jax.jacfwd(get_u(field_fn))
+        gradu_plus_p_fn = lambda x: gradu_fn(x) - FLAGS.pressure_factor * get_p(field_fn)(
+            x
+        ) * np.eye(2)
+        err = vmap_divergence_tensor(points_in_domain, gradu_plus_p_fn)
+
+
+    return (1.0 / FLAGS.pressure_factor ** 2) * np.mean(err ** 2, axis=1)
 
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):
     source_params, bc_params, per_hole_params, n_holes = params
+    sinusoidal_magnitude = np.sin(
+        np.pi * (points_on_inlet[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin)
+    ).reshape(-1, 1)
+
     return (
         field_fn(points_on_inlet)[:, :-1]
-        - bc_params[0]
-        * np.ones_like(points_on_inlet)
-        * np.array([1.0, 0.0]).reshape(1, 2)
+        - bc_params[0] * sinusoidal_magnitude * np.array([1.0, 0.0]).reshape(1, 2)
     ) ** 2
 
 
@@ -125,63 +136,88 @@ def loss_noslip_fn(field_fn, points_noslip, params):
 
 
 def loss_fn(field_fn, points, params):
-    points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
+    (
+        points_on_inlet,
+        points_on_outlet,
+        points_on_walls,
+        points_on_holes,
+        points_in_domain,
+    ) = points
     points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
-    p_in_domain = get_p(field_fn)(points_in_domain)
+    p_outlet = get_p(field_fn)(points_on_outlet)
     return (
         {
             "loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
             "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params)),
+            "loss_p_outlet": np.mean(p_outlet ** 2),
         },
         {
-            "loss_in_domain": np.mean(
-                loss_domain_fn(field_fn, points_in_domain, params)
-            ),
-            "mean_square_pressure": np.mean(p_in_domain) ** 2,
+            "loss_stress": np.mean(loss_stress_fn(field_fn, points_in_domain, params)),
+            "loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
         },
     )
 
 
-@partial(jax.jit, static_argnums=(1,))
-def sample_params(key, args):
-
-    if hasattr(args, "fixed_num_pdes") and args.fixed_num_pdes is not None:
+@jax.jit
+def sample_params(key):
+    if FLAGS.fixed_num_pdes is not None:
         key = jax.random.PRNGKey(
             jax.random.randint(
-                key, (1,), np.array([0]), np.array([args.fixed_num_pdes])
+                key, (1,), np.array([0]), np.array([FLAGS.fixed_num_pdes])
             )[0]
         )
 
     k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
 
     # These keys will all be 0 if we're not varying that factor
-    k1 = k1 * args.vary_source
-    k2 = k2 * args.vary_bc
-    k3 = k3 * args.vary_geometry
-    k4 = k4 * args.vary_geometry
-    k5 = k5 * args.vary_geometry
-    k6 = k6 * args.vary_geometry
+    k1 = k1 * FLAGS.vary_source
+    k2 = k2 * FLAGS.vary_bc
+    k3 = k3 * FLAGS.vary_geometry
+    k4 = k4 * FLAGS.vary_geometry
+    k5 = k5 * FLAGS.vary_geometry
+    k6 = k6 * FLAGS.vary_geometry
 
     source_params = jax.random.uniform(k1, shape=(2,), minval=1 / 4, maxval=3.0 / 4)
 
-    bc_params = args.bc_scale * jax.random.uniform(
+    bc_params = FLAGS.bc_scale * jax.random.uniform(
         k2, minval=-1.0, maxval=1.0, shape=(1,)
     )
 
-    n_holes = jax.random.randint(k3, shape=(1,), minval=1, maxval=MAX_HOLES + 1)[0]
+    n_holes = jax.random.randint(
+        k3, shape=(1,), minval=np.array([1]), maxval=np.array([FLAGS.max_holes + 1])
+    )[0]
 
-    pore_shapes = jax.random.uniform(k4, minval=-0.2, maxval=0.2, shape=(MAX_HOLES, 2,))
+    pore_shapes = jax.random.uniform(
+        k4, minval=-0.2, maxval=0.2, shape=(FLAGS.max_holes, 2,)
+    )
 
     pore_sizes = jax.random.uniform(
-        k6, minval=0.05, maxval=MAX_SIZE / n_holes, shape=(MAX_HOLES, 1)
+        k6,
+        minval=0.05,
+        maxval=FLAGS.max_hole_size / n_holes,
+        shape=(FLAGS.max_holes, 1),
     )
 
     pore_x0y0 = jax.random.uniform(
         k5,
-        minval=np.array([[XMIN + np.max(pore_sizes), YMIN + np.max(pore_sizes)]]),
-        maxval=np.array([[XMAX - np.max(pore_sizes), YMAX - np.max(pore_sizes)]]),
-        shape=(MAX_HOLES, 2),
+        minval=np.array(
+            [
+                [
+                    FLAGS.xmin + 1.5 * np.max(pore_sizes),
+                    FLAGS.ymin + 1.5 * np.max(pore_sizes),
+                ]
+            ]
+        ),
+        maxval=np.array(
+            [
+                [
+                    FLAGS.xmax - 1.5 * np.max(pore_sizes),
+                    FLAGS.ymax - 1.5 * np.max(pore_sizes),
+                ]
+            ]
+        ),
+        shape=(FLAGS.max_holes, 2),
     )
 
     per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
@@ -201,46 +237,59 @@ def is_in_hole(xy, pore_params, tol=1e-7):
 @partial(jax.jit, static_argnums=(1,))
 def sample_points(key, n, params):
     _, _, per_hole_params, n_holes = params
-    k1, k2, k3, k4 = jax.random.split(key, 4)
-    ratio = (XMAX - XMIN) / (YMAX - YMIN)
-    n_on_inlet = int((n / 2) / (1 + 2 * ratio))
-    n_on_walls = n // 2 - n_on_inlet
-    n_on_holes = n - n_on_walls - n_on_inlet
+    k1, k2, k3, k4, k5 = jax.random.split(key, 5)
+    ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
+    n_on_inlet = n // 12
+    n_on_outlet = n_on_inlet
+    n_on_walls = n // 6
+    n_on_holes = n // 2 - n_on_walls - n_on_inlet - n_on_outlet
     points_on_inlet = sample_points_on_inlet(k1, n_on_inlet, params)
-    points_on_walls = sample_points_on_walls(k2, n_on_walls, params)
-    points_on_holes = sample_points_on_pores(k3, n_on_holes, params)
-    points_in_domain = sample_points_in_domain(k4, n, params)
-    return points_on_inlet, points_on_walls, points_on_holes, points_in_domain
+    points_on_outlet = sample_points_on_outlet(k2, n_on_outlet, params)
+    points_on_walls = sample_points_on_walls(k3, n_on_walls, params)
+    points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
+    points_in_domain = sample_points_in_domain(k5, n, params)
+    return (
+        points_on_inlet,
+        points_on_outlet,
+        points_on_walls,
+        points_on_holes,
+        points_in_domain,
+    )
 
 
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_on_inlet(key, n, params):
     _, _, per_hole_params, n_holes = params
-    k1, k2 = jax.random.split(key)
-    lhs_y = np.linspace(YMIN, YMAX, n, endpoint=False) + jax.random.uniform(
-        k1, minval=0.0, maxval=(YMAX - YMIN) / n, shape=(1,)
+    lhs_y = np.linspace(FLAGS.ymin, FLAGS.ymax, n, endpoint=False) + jax.random.uniform(
+        key, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / n, shape=(1,)
     )
-    rhs_y = np.linspace(YMAX, YMIN, n, endpoint=False) + jax.random.uniform(
-        k2, minval=-(YMAX - YMIN) / n, maxval=0.0, shape=(1,)
+    lhs = np.stack([FLAGS.xmin * np.ones(n), lhs_y], axis=1)
+    return lhs
+
+
+def sample_points_on_outlet(key, n, params):
+    return sample_points_on_inlet(key, n, params) + np.array(
+        [[FLAGS.xmax - FLAGS.xmin, 0.0]]
     )
-    lhs = np.stack([XMIN * np.ones(n), lhs_y], axis=1)
-    rhs = np.stack([XMAX * np.ones(n), rhs_y], axis=1)
-    return np.concatenate([lhs, rhs])
 
 
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_on_walls(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2 = jax.random.split(key)
-    top_x = np.linspace(XMIN, XMAX, n // 2, endpoint=False) + jax.random.uniform(
-        k1, minval=0.0, maxval=(XMAX - XMIN) / (n // 2), shape=(1,)
+    top_x = np.linspace(
+        FLAGS.xmin, FLAGS.xmax, n // 2, endpoint=False
+    ) + jax.random.uniform(
+        k1, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / (n // 2), shape=(1,)
     )
-    top = np.stack([top_x, YMAX * np.ones(n // 2)], axis=1)
+    top = np.stack([top_x, FLAGS.ymax * np.ones(n // 2)], axis=1)
 
-    bot_x = np.linspace(XMIN, XMAX, n - n // 2, endpoint=False) + jax.random.uniform(
-        k2, minval=0.0, maxval=(XMAX - XMIN) / (n - n // 2), shape=(1,)
+    bot_x = np.linspace(
+        FLAGS.xmin, FLAGS.xmax, n - n // 2, endpoint=False
+    ) + jax.random.uniform(
+        k2, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / (n - n // 2), shape=(1,)
     )
-    bot = np.stack([bot_x, YMIN * np.ones(n - n // 2)], axis=1)
+    bot = np.stack([bot_x, FLAGS.ymin * np.ones(n - n // 2)], axis=1)
 
     return np.concatenate([top, bot])
 
@@ -298,27 +347,29 @@ def sample_points_on_pores(key, n, params):
     # Hack to sample valid at random until we have sampled all,
     # and then to start sampling the valid ones again, without touching
     # the others
-    p = np.concatenate([valid * (1e-2 ** i) for i in range(MAX_HOLES * 2)])
+    p = np.concatenate([valid * (1e-2 ** i) for i in range(FLAGS.max_holes * 2)])
 
-    idxs = jax.random.choice(keys[4], n * MAX_HOLES * 2, replace=False, p=p, shape=(n,))
+    idxs = jax.random.choice(
+        keys[4], n * FLAGS.max_holes * 2, replace=False, p=p, shape=(n,)
+    )
 
-    return np.tile(hole_points, (MAX_HOLES * 2, 1))[idxs]
+    return np.tile(hole_points, (FLAGS.max_holes * 2, 1))[idxs]
 
 
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_in_domain(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2 = jax.random.split(key)
-    ratio = (XMAX - XMIN) / (YMAX - YMIN)
+    ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
     # total number of points is 2 * n
     # so as long as the fraction of volume covered is << 1/2 we are ok
     n_x = npo.int32(npo.sqrt(2) * npo.sqrt(n) * npo.sqrt(ratio))
     n_y = npo.int32(npo.sqrt(2) * npo.sqrt(n) / npo.sqrt(ratio))
-    dx = (XMAX - XMIN) / n_x
-    dy = (YMAX - YMIN) / n_y
+    dx = (FLAGS.xmax - FLAGS.xmin) / n_x
+    dy = (FLAGS.ymax - FLAGS.ymin) / n_y
 
-    xs = np.linspace(XMIN, XMAX, n_x, endpoint=False)
-    ys = np.linspace(YMIN, YMAX, n_y, endpoint=False)
+    xs = np.linspace(FLAGS.xmin, FLAGS.xmax, n_x, endpoint=False)
+    ys = np.linspace(FLAGS.ymin, FLAGS.ymax, n_y, endpoint=False)
 
     xv, yv = np.meshgrid(xs, ys)
 
@@ -392,7 +443,8 @@ def single_second_order_taylor_eval(xi, x0i, u0, g0, h0, d=3):
 
 def fenics_to_jax(u, gridsize=300, temp=1.0):
     X, Y = np.meshgrid(
-        np.linspace(XMIN, XMAX, 3 * gridsize), np.linspace(YMIN, YMAX, gridsize)
+        np.linspace(FLAGS.xmin, FLAGS.xmax, 3 * gridsize),
+        np.linspace(FLAGS.ymin, FLAGS.ymax, gridsize),
     )
 
     XY = list(zip(X.reshape(-1), Y.reshape(-1)))
@@ -443,7 +495,10 @@ def error_on_coords(fenics_fn, jax_fn, coords=None):
 def plot_solution(u_p, params):
     _, _, per_hole_params, num_holes = params
     u, p = fa.split(u_p)
-    X, Y = npo.meshgrid(npo.linspace(XMIN, XMAX, 300), npo.linspace(YMIN, YMAX, 100))
+    X, Y = npo.meshgrid(
+        npo.linspace(FLAGS.xmin, FLAGS.xmax, 300),
+        npo.linspace(FLAGS.ymin, FLAGS.ymax, 100),
+    )
     Xflat, Yflat = X.reshape(-1), Y.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
@@ -457,7 +512,10 @@ def plot_solution(u_p, params):
     U = npo.array([uv[0] for uv in UV]).reshape(X.shape)
     V = npo.array([uv[1] for uv in UV]).reshape(Y.shape)
 
-    X_, Y_ = npo.meshgrid(npo.linspace(XMIN, XMAX, 60), npo.linspace(YMIN, YMAX, 40))
+    X_, Y_ = npo.meshgrid(
+        npo.linspace(FLAGS.xmin, FLAGS.xmax, 60),
+        npo.linspace(FLAGS.ymin, FLAGS.ymax, 40),
+    )
     Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
@@ -473,7 +531,11 @@ def plot_solution(u_p, params):
     speed_ = npo.linalg.norm(npo.stack([U_, V_], axis=1), axis=1)
 
     seed_points = npo.stack(
-        [XMIN * npo.ones(40), npo.linspace(YMIN + 0.1, YMAX - 0.1, 40)], axis=1
+        [
+            FLAGS.xmin * npo.ones(40),
+            npo.linspace(FLAGS.ymin + 0.1, FLAGS.ymax - 0.1, 40),
+        ],
+        axis=1,
     )
 
     parr = npo.array([p([x, y]) for x, y in zip(Xflat_, Yflat_)])
@@ -497,26 +559,35 @@ def plot_solution(u_p, params):
         V,
         color=speed / speed.max(),
         start_points=seed_points,
-        density=100,
-        linewidth=0.3,
+        density=10,
+        linewidth=0.2,
         arrowsize=0.0,
     )  # , np.sqrt(U**2+V**2))
 
 
-if __name__ == "__main__":
-    args = parser.parse_args()
-    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
-    key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
-    params = sample_params(subkey, args)
+def main(argv):
+    print("non-flag arguments:", argv)
+
+    key, subkey = jax.random.split(jax.random.PRNGKey(FLAGS.seed))
+    params = sample_params(subkey)
 
     for i in range(1, 10):
         key, subkey = jax.random.split(key)
         points = sample_points(subkey, 512, params)
-        points_on_inlet, points_on_walls, points_on_holes, points_in_domain = points
+        (
+            points_on_inlet,
+            points_on_outlet,
+            points_on_walls,
+            points_on_holes,
+            points_in_domain,
+        ) = points
         plt.figure()
         plt.subplot(1, 1, 1)
         plt.scatter(
             points_on_inlet[:, 0], points_on_inlet[:, 1], label="points on inlet"
+        )
+        plt.scatter(
+            points_on_outlet[:, 0], points_on_outlet[:, 1], label="points on outlet"
         )
         plt.scatter(
             points_on_walls[:, 0], points_on_walls[:, 1], label="points on walls"
@@ -532,3 +603,7 @@ if __name__ == "__main__":
         plt.legend()
 
         plt.show()
+
+
+if __name__ == "__main__":
+    app.run(main)
