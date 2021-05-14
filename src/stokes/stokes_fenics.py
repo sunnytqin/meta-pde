@@ -130,18 +130,25 @@ def solve_fenics(params, boundary_points=32, resolution=32):
             + q * fa.div(u) * fa.dx
         )
 
-    fa.solve(
-        F == 0,
-        u_p,
-        [bc_walls, bc_in, bc_out],
-        solver_parameters={
-            "newton_solver": {
-                "maximum_iterations": int(1000),
-                "relaxation_parameter": 0.8,
-                "linear_solver": "mumps",
-            }
-        },
-    )
+    try:
+        fa.solve(
+            F == 0,
+            u_p,
+            [bc_walls, bc_in, bc_out],
+            solver_parameters={
+                "newton_solver": {
+                    "maximum_iterations": FLAGS.max_newton_steps,
+                    "relaxation_parameter": FLAGS.relaxation_parameter,
+                    "linear_solver": "mumps",
+                }
+            },
+        )
+    except Exception as e:
+        print("Failed solve: ", e)
+        print("Failed on params: ", params)
+        fa.plot(mesh)
+        plt.show()
+        pdb.set_trace()
 
     return u_p
 

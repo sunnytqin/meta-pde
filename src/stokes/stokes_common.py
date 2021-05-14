@@ -31,7 +31,7 @@ flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("pressure_factor", 1.0, "scale on random uniform bc")
 flags.DEFINE_integer("max_holes", 3, "scale on random uniform bc")
-flags.DEFINE_float("max_hole_size", 0.6, "scale on random uniform bc")
+flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
 flags.DEFINE_float("bc_weight", 100.0, "weight on bc loss")
 
 flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
@@ -194,31 +194,31 @@ def sample_params(key):
 
     pore_sizes = jax.random.uniform(
         k6,
-        minval=0.05,
+        minval=0.1,
         maxval=FLAGS.max_hole_size / n_holes,
         shape=(FLAGS.max_holes, 1),
     )
 
-    pore_x0y0 = jax.random.uniform(
-        k5,
-        minval=np.array(
-            [
-                [
-                    FLAGS.xmin + 1.5 * np.max(pore_sizes),
-                    FLAGS.ymin + 1.5 * np.max(pore_sizes),
-                ]
-            ]
-        ),
-        maxval=np.array(
-            [
-                [
-                    FLAGS.xmax - 1.5 * np.max(pore_sizes),
-                    FLAGS.ymax - 1.5 * np.max(pore_sizes),
-                ]
-            ]
-        ),
-        shape=(FLAGS.max_holes, 2),
-    )
+    min_step = FLAGS.max_hole_size
+
+    xlow = FLAGS.xmin + 1.5 * FLAGS.max_hole_size
+    xhigh = FLAGS.xmax - 1.5 * FLAGS.max_hole_size
+    ylow = FLAGS.ymin + 1.5 * FLAGS.max_hole_size
+    yhigh = FLAGS.ymax - 1.5 * FLAGS.max_hole_size
+
+    possible_xs = np.linspace(xlow,
+                              xhigh,
+                              int((xhigh-xlow)//(1.1*FLAGS.max_hole_size/2))+1,
+                              endpoint=True)
+    possible_ys = np.linspace(ylow,
+                              yhigh,
+                              int((yhigh-ylow)//(1.1*FLAGS.max_hole_size/2))+1,
+                              endpoint=True)
+    xys = np.stack([possible_xs, possible_ys], axis=1)
+
+    idxs = jax.random.choice(k5, xys.shape[0], shape=(FLAGS.max_holes,),
+                             replace=False)
+    pore_x0y0 = xys[idxs]
 
     per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
 

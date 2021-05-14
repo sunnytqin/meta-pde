@@ -12,14 +12,26 @@ flags.DEFINE_string("out_dir", None, "out directory")
 flags.DEFINE_string("expt_name", "default", "expt name")
 
 
+flags.DEFINE_float(
+    "relaxation_parameter",
+    0.3,
+    "Newton solver relaxation parameter",
+)
+flags.DEFINE_integer(
+    "max_newton_steps",
+    250,
+    "Newton solver max steps",
+)
+
+
 # PDE
 flags.DEFINE_string("pde", "poisson", "which PDE")
 flags.DEFINE_integer(
-    "ground_truth_resolution", 20, "mesh resolution for fenics ground truth"
+    "ground_truth_resolution", 16, "mesh resolution for fenics ground truth"
 )
 flags.DEFINE_float(
     "boundary_resolution_factor",
-    4.0,
+    3.0,
     "ratio of resolution to points around boundary of shape",
 )
 flags.DEFINE_integer("fixed_num_pdes", None, "fixed number of pdes")
