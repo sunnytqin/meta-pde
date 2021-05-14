@@ -2,6 +2,9 @@ import absl
 from absl import app
 from absl import flags
 
+from jax.config import config; config.update("jax_log_compiles", 1)
+
+
 FLAGS = flags.FLAGS
 
 # Loggin
@@ -41,7 +44,7 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "inner_points", 256, "num support points on the boundary and in domain",
 )
-flags.DEFINE_integer("outer_steps", int(1e5), "num outer steps")
+flags.DEFINE_integer("outer_steps", int(1e8), "num outer steps")
 flags.DEFINE_integer("num_layers", 3, "num fcnn layers")
 flags.DEFINE_integer("layer_size", 256, "fcnn layer size")
 flags.DEFINE_boolean("siren", True, "use siren")
@@ -49,6 +52,7 @@ flags.DEFINE_float("grad_clip", 1e14, "max grad for clipping")
 flags.DEFINE_float("siren_omega", 1.0, "siren_omega")
 flags.DEFINE_float("siren_omega0", 3.0, "siren_omega0")
 
-flags.DEFINE_integer("viz_every", 10000, "plot every N steps")
-flags.DEFINE_integer("val_every", 25, "validate every N steps")
-flags.DEFINE_integer("measure_grad_norm_every", 250, "")
+flags.DEFINE_integer("viz_every", int(1e5), "plot every N steps")
+flags.DEFINE_integer("val_every", int(1e2), "validate every N steps")
+flags.DEFINE_integer("log_every", int(1e2), "tflog every N steps")
+flags.DEFINE_integer("measure_grad_norm_every", int(1e3), "")

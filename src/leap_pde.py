@@ -211,79 +211,80 @@ def main(argv):
 
             val_losses = validation_losses(optimizer.target)
 
-        log(
-            "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
-            "meta_grad_norm: {}, time: {}".format(
-                step,
-                np.mean(losses[0][:, -1]),
-                np.mean(val_losses[0][:, -1]),
-                val_error,
-                meta_grad_norm,
-                t.interval,
+        if step % FLAGS.log_every == 0:
+            log(
+                "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
+                "meta_grad_norm: {}, time: {}".format(
+                    step,
+                    np.mean(losses[0][:, -1]),
+                    np.mean(val_losses[0][:, -1]),
+                    val_error,
+                    meta_grad_norm,
+                    t.interval,
+                )
             )
-        )
-        log(
-            "meta_loss_max: {}, meta_loss_min: {}, meta_loss_std: {}".format(
-                np.max(losses[0][:, -1]),
-                np.min(losses[0][:, -1]),
-                np.std(losses[0][-1]),
+            log(
+                "meta_loss_max: {}, meta_loss_min: {}, meta_loss_std: {}".format(
+                    np.max(losses[0][:, -1]),
+                    np.min(losses[0][:, -1]),
+                    np.std(losses[0][-1]),
+                )
             )
-        )
-        log(
-            "per_step_losses: {}\nper_step_val_losses:{}\n".format(
-                np.mean(losses[0], axis=0), np.mean(val_losses[0], axis=0),
+            log(
+                "per_step_losses: {}\nper_step_val_losses:{}\n".format(
+                    np.mean(losses[0], axis=0), np.mean(val_losses[0], axis=0),
+                )
             )
-        )
 
-        if tflogger is not None:
-            tflogger.log_histogram("batch_meta_losses", losses[0][:, -1], step)
-            tflogger.log_histogram("batch_val_losses", val_losses[0][:, -1], step)
-            tflogger.log_scalar("meta_loss", float(np.mean(losses[0][:, -1])), step)
-            tflogger.log_scalar("val_loss", float(np.mean(val_losses[0][:, -1])), step)
-            for i in range(len(per_dim_val_error)):
-                tflogger.log_scalar(
-                    "val_error_dim_{}".format(i), float(per_dim_val_error[i]), step
-                )
-            for k in losses[1]:
-                tflogger.log_scalar(
-                    "meta_" + k, float(np.mean(losses[1][k][:, -1])), step
-                )
-            for inner_step in range(FLAGS.inner_steps + 1):
-                tflogger.log_scalar(
-                    "loss_step_{}".format(inner_step),
-                    float(np.mean(losses[0][:, inner_step])),
-                    step,
-                )
-                tflogger.log_scalar(
-                    "val_loss_step_{}".format(inner_step),
-                    float(np.mean(val_losses[0][:, inner_step])),
-                    step,
-                )
-                tflogger.log_histogram(
-                    "batch_loss_step_{}".format(inner_step),
-                    losses[0][:, inner_step],
-                    step,
-                )
-                tflogger.log_histogram(
-                    "batch_val_loss_step_{}".format(inner_step),
-                    val_losses[0][:, inner_step],
-                    step,
-                )
+            if tflogger is not None:
+                tflogger.log_histogram("batch_meta_losses", losses[0][:, -1], step)
+                tflogger.log_histogram("batch_val_losses", val_losses[0][:, -1], step)
+                tflogger.log_scalar("meta_loss", float(np.mean(losses[0][:, -1])), step)
+                tflogger.log_scalar("val_loss", float(np.mean(val_losses[0][:, -1])), step)
+                for i in range(len(per_dim_val_error)):
+                    tflogger.log_scalar(
+                        "val_error_dim_{}".format(i), float(per_dim_val_error[i]), step
+                    )
                 for k in losses[1]:
                     tflogger.log_scalar(
-                        "{}_step_{}".format(k, inner_step),
-                        float(np.mean(losses[1][k][:, inner_step])),
+                        "meta_" + k, float(np.mean(losses[1][k][:, -1])), step
+                    )
+                for inner_step in range(FLAGS.inner_steps + 1):
+                    tflogger.log_scalar(
+                        "loss_step_{}".format(inner_step),
+                        float(np.mean(losses[0][:, inner_step])),
                         step,
                     )
-            tflogger.log_scalar("val_error", float(val_error), step)
-            tflogger.log_scalar("meta_grad_norm", float(meta_grad_norm), step)
-            tflogger.log_scalar("step_time", t.interval, step)
+                    tflogger.log_scalar(
+                        "val_loss_step_{}".format(inner_step),
+                        float(np.mean(val_losses[0][:, inner_step])),
+                        step,
+                    )
+                    tflogger.log_histogram(
+                        "batch_loss_step_{}".format(inner_step),
+                        losses[0][:, inner_step],
+                        step,
+                    )
+                    tflogger.log_histogram(
+                        "batch_val_loss_step_{}".format(inner_step),
+                        val_losses[0][:, inner_step],
+                        step,
+                    )
+                    for k in losses[1]:
+                        tflogger.log_scalar(
+                            "{}_step_{}".format(k, inner_step),
+                            float(np.mean(losses[1][k][:, inner_step])),
+                            step,
+                        )
+                tflogger.log_scalar("val_error", float(val_error), step)
+                tflogger.log_scalar("meta_grad_norm", float(meta_grad_norm), step)
+                tflogger.log_scalar("step_time", t.interval, step)
 
-            if step % FLAGS.viz_every == 0:
-                # These take lots of filesize so only do them sometimes
+                if step % FLAGS.viz_every == 0:
+                    # These take lots of filesize so only do them sometimes
 
-                for k, v in jax_tools.dict_flatten(optimizer.target.params):
-                    tflogger.log_histogram("Param: " + k, v.flatten(), step)
+                    for k, v in jax_tools.dict_flatten(optimizer.target.params):
+                        tflogger.log_histogram("Param: " + k, v.flatten(), step)
 
         if FLAGS.viz_every > 0 and step % FLAGS.viz_every == 0:
             plt.figure()

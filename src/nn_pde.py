@@ -39,7 +39,7 @@ from absl import flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 1, "batch size (in tasks)")
-flags.DEFINE_float("outer_lr", 1e-4, "outer learning rate")
+flags.DEFINE_float("outer_lr", 1e-5, "outer learning rate")
 flags.DEFINE_string("optimizer", "adam", help="adam or ranger or adahessian")
 
 
@@ -211,70 +211,70 @@ def main(argv):
         with Timer() as t:
             optimizer, loss, loss_aux, grad_norm = train_step(subkey, optimizer)
 
-            # ---- This big section is logging a bunch of debug stats
-            # loss grad norms; plotting the sampled points; plotting the vals at those
-            # points; plotting the losses at those points.
+        # ---- This big section is logging a bunch of debug stats
+        # loss grad norms; plotting the sampled points; plotting the vals at those
+        # points; plotting the losses at those points.
 
-            # Todo (alex) -- see if we can clean it up, and maybe also do it in maml etc
-            if (
-                FLAGS.measure_grad_norm_every > 0
-                and step % FLAGS.measure_grad_norm_every == 0
-            ):
-                loss_vals_and_grad_norms = get_grad_norms(subkey, optimizer.target)
-                loss_vals_and_grad_norms = {k: (float(v[0]), float(v[1]))
-                                            for k, v in loss_vals_and_grad_norms.items()}
-                print("loss vals and grad norms: ", loss_vals_and_grad_norms)
-                if tflogger is not None:
-                    for k in loss_vals_and_grad_norms:
-                        tflogger.log_scalar(
-                            "grad_norm_{}".format(k),
-                            float(loss_vals_and_grad_norms[k][1]),
-                            step,
-                        )
-                    _k1, _k2 = jax.random.split(
-                        jax.random.split(subkey, FLAGS.bsize)[0], 2
+        # Todo (alex) -- see if we can clean it up, and maybe also do it in maml etc
+        if (
+            FLAGS.measure_grad_norm_every > 0
+            and step % FLAGS.measure_grad_norm_every == 0
+        ):
+            loss_vals_and_grad_norms = get_grad_norms(subkey, optimizer.target)
+            loss_vals_and_grad_norms = {k: (float(v[0]), float(v[1]))
+                                        for k, v in loss_vals_and_grad_norms.items()}
+            print("loss vals and grad norms: ", loss_vals_and_grad_norms)
+            if tflogger is not None:
+                for k in loss_vals_and_grad_norms:
+                    tflogger.log_scalar(
+                        "grad_norm_{}".format(k),
+                        float(loss_vals_and_grad_norms[k][1]),
+                        step,
                     )
-                    _params = pde.sample_params(_k1)
-                    _points = pde.sample_points(_k2, FLAGS.outer_points, _params)
+                _k1, _k2 = jax.random.split(
+                    jax.random.split(subkey, FLAGS.bsize)[0], 2
+                )
+                _params = pde.sample_params(_k1)
+                _points = pde.sample_points(_k2, FLAGS.outer_points, _params)
+                plt.figure()
+                for _pointsi in _points:
+                    plt.scatter(_pointsi[:, 0], _pointsi[:, 1])
+                tflogger.log_plots("Points", [plt.gcf()], step)
+                _all_points = np.concatenate(_points)
+                _vals = optimizer.target(_all_points)
+                _vals = _vals.reshape((_vals.shape[0], -1))
+                _boundary_losses, _domain_losses = jax.vmap(
+                    lambda x: pde.loss_fn(
+                        optimizer.target,
+                        (x.reshape(1, -1) for _ in range(len(_points))),
+                        _params,
+                    )
+                )(_all_points)
+                _all_losses = {**_boundary_losses, **_domain_losses}
+                for _losskey in _all_losses:
+                    # print(_losskey)
                     plt.figure()
-                    for _pointsi in _points:
-                        plt.scatter(_pointsi[:, 0], _pointsi[:, 1])
-                    tflogger.log_plots("Points", [plt.gcf()], step)
-                    _all_points = np.concatenate(_points)
-                    _vals = optimizer.target(_all_points)
-                    _vals = _vals.reshape((_vals.shape[0], -1))
-                    _boundary_losses, _domain_losses = jax.vmap(
-                        lambda x: pde.loss_fn(
-                            optimizer.target,
-                            (x.reshape(1, -1) for _ in range(len(_points))),
-                            _params,
-                        )
-                    )(_all_points)
-                    _all_losses = {**_boundary_losses, **_domain_losses}
-                    for _losskey in _all_losses:
-                        # print(_losskey)
-                        plt.figure()
-                        _loss = _all_losses[_losskey]
-                        # print(_loss.shape)
-                        while len(_loss.shape) > 1:
-                            _loss = _loss.mean(axis=1)
-                        clrs = plt.scatter(
-                            _all_points[:, 0],
-                            _all_points[:, 1],
-                            c=_loss[: len(_all_points)],
-                        )
-                        plt.colorbar(clrs)
-                        tflogger.log_plots("{}".format(_losskey), [plt.gcf()], step)
+                    _loss = _all_losses[_losskey]
+                    # print(_loss.shape)
+                    while len(_loss.shape) > 1:
+                        _loss = _loss.mean(axis=1)
+                    clrs = plt.scatter(
+                        _all_points[:, 0],
+                        _all_points[:, 1],
+                        c=_loss[: len(_all_points)],
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots("{}".format(_losskey), [plt.gcf()], step)
 
-                    for dim in range(_vals.shape[1]):
-                        plt.figure()
-                        clrs = plt.scatter(
-                            _all_points[:, 0], _all_points[:, 1], c=_vals[:, dim]
-                        )
-                        plt.colorbar(clrs)
-                        tflogger.log_plots(
-                            "Outputs dim {}".format(dim), [plt.gcf()], step
-                        )
+                for dim in range(_vals.shape[1]):
+                    plt.figure()
+                    clrs = plt.scatter(
+                        _all_points[:, 0], _all_points[:, 1], c=_vals[:, dim]
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "Outputs dim {}".format(dim), [plt.gcf()], step
+                    )
 
         if step % FLAGS.val_every == 0:
             rmse, norms, rel_err, per_dim_rel_err = vmap_validation_error(
@@ -283,47 +283,48 @@ def main(argv):
 
             val_loss = validation_losses(optimizer.target)
 
-        log(
-            "step: {}, loss: {}, val_loss: {}, val_rmse: {}, "
-            "val_rel_err: {}, val_true_norms: {}, "
-            "per_dim_val_error: {}, grad_norm: {}, time: {}".format(
-                step,
-                loss,
-                val_loss,
-                rmse,
-                rel_err,
-                norms,
-                per_dim_rel_err,
-                grad_norm,
-                t.interval,
-            )
-        )
-
-        if tflogger is not None:
-            # A lot of these names have unnecessary "meta_"
-            # just for consistency with maml_pde and leap_pde
-            tflogger.log_scalar("meta_loss", float(np.mean(loss)), step)
-            tflogger.log_scalar("val_loss", float(np.mean(val_loss)), step)
-
-            tflogger.log_scalar("val_rel_rmse", float(rel_err), step)
-            tflogger.log_scalar("val_rmse", float(rmse), step)
-
-            for i in range(len(per_dim_rel_err)):
-                tflogger.log_scalar(
-                    "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
+        if step % FLAGS.log_every == 0:
+            log(
+                "step: {}, loss: {}, val_loss: {}, val_rmse: {}, "
+                "val_rel_err: {}, val_true_norms: {}, "
+                "per_dim_val_error: {}, grad_norm: {}, time: {}".format(
+                    step,
+                    loss,
+                    val_loss,
+                    rmse,
+                    rel_err,
+                    norms,
+                    per_dim_rel_err,
+                    grad_norm,
+                    t.interval,
                 )
-                tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
+            )
 
-            tflogger.log_scalar("meta_grad_norm", float(grad_norm), step)
-            tflogger.log_scalar("step_time", t.interval, step)
-            for k in loss_aux:
-                tflogger.log_scalar("meta_" + k, float(np.mean(loss_aux[k])), step)
+            if tflogger is not None:
+                # A lot of these names have unnecessary "meta_"
+                # just for consistency with maml_pde and leap_pde
+                tflogger.log_scalar("meta_loss", float(np.mean(loss)), step)
+                tflogger.log_scalar("val_loss", float(np.mean(val_loss)), step)
 
-            if step % FLAGS.viz_every == 0:
-                # These take lots of filesize so only do them sometimes
+                tflogger.log_scalar("val_rel_rmse", float(rel_err), step)
+                tflogger.log_scalar("val_rmse", float(rmse), step)
 
-                for k, v in jax_tools.dict_flatten(optimizer.target.params):
-                    tflogger.log_histogram("Param: " + k, v.flatten(), step)
+                for i in range(len(per_dim_rel_err)):
+                    tflogger.log_scalar(
+                        "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
+                    )
+                    tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
+
+                tflogger.log_scalar("meta_grad_norm", float(grad_norm), step)
+                tflogger.log_scalar("step_time", t.interval, step)
+                for k in loss_aux:
+                    tflogger.log_scalar("meta_" + k, float(np.mean(loss_aux[k])), step)
+
+                if step % FLAGS.viz_every == 0:
+                    # These take lots of filesize so only do them sometimes
+
+                    for k, v in jax_tools.dict_flatten(optimizer.target.params):
+                        tflogger.log_histogram("Param: " + k, v.flatten(), step)
 
         if FLAGS.viz_every > 0 and step % FLAGS.viz_every == 0:
             plt.figure()
