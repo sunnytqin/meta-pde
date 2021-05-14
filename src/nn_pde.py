@@ -40,6 +40,7 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 1, "batch size (in tasks)")
 flags.DEFINE_float("outer_lr", 1e-4, "outer learning rate")
+flags.DEFINE_string("optimizer", "adam", help="adam or ranger or adahessian")
 
 
 def main(argv):
@@ -47,6 +48,8 @@ def main(argv):
         FLAGS.out_dir = FLAGS.pde + "_nn_results"
 
     FLAGS.n_eval = 1
+    FLAGS.fixed_num_pdes = 1
+
     pde = get_pde(FLAGS.pde)
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
@@ -78,6 +81,7 @@ def main(argv):
         losses, aux = jax.vmap(task_loss_fn, (0, None))(keys, model)
         return np.sum(losses), {k: np.sum(v) for k, v in aux.items()}
 
+    @jax.jit
     def get_grad_norms(key, model):
         _, loss_dict = batch_loss_fn(key, model)
         losses_and_grad_norms = {}
@@ -90,7 +94,7 @@ def main(argv):
                     jax.tree_util.tree_map(lambda x: np.sum(x ** 2), loss_grad),
                 )
             )
-            losses_and_grad_norms[k] = (float(loss_val), float(loss_grad_norm))
+            losses_and_grad_norms[k] = (loss_val, loss_grad_norm)
         return losses_and_grad_norms
 
     Field = pde.BaseField.partial(
@@ -109,15 +113,18 @@ def main(argv):
 
     # --------------------- Defining the evaluation functions --------------------
 
-    # @partial(jax.jit, static_argnums=(3, 4))
-    def get_final_model(key, model, *args):
+
+    def get_final_model(unused_key, model,
+                         _unused_params=None,
+                         _unused_num_steps=None,
+                         _unused_meta_alg_def=None):
         # Input key is terminal
         return model
 
-    @partial(jax.jit, static_argnums=(4, 5))
-    def make_coef_func(key, model, params, coords, *args):
+    @jax.jit
+    def make_coef_func(key, model, params, coords):
         # Input key is terminal
-        final_model = get_final_model(key, model, params, *args)
+        final_model = get_final_model(key, model, params)
 
         return np.squeeze(final_model(coords))
 
@@ -129,7 +136,7 @@ def main(argv):
         keys = jax.random.split(key, FLAGS.n_eval)
 
         coefs = vmap(make_coef_func, (0, None, 0, 0))(
-            keys, model, ground_truth_params, points,
+            keys, model, ground_truth_params, points
         )
         coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
@@ -144,6 +151,44 @@ def main(argv):
             np.sqrt(np.mean(rel_sq_err)),
             np.sqrt(np.mean(rel_sq_err, axis=(0, 1))),
         )
+
+    @jax.jit
+    def train_step(key, optimizer):
+        if FLAGS.optimizer == "adahessian":
+            k1, k2 = jax.random.split(key)
+            loss, loss_aux = batch_loss_fn(k1, optimizer.target)
+            batch_grad, batch_hess = grad_and_hessian(
+                lambda model: batch_loss_fn(k1, model)[0],
+                (optimizer.target,),
+                k2,
+            )
+        else:
+            (loss, loss_aux), batch_grad = jax.value_and_grad(
+                batch_loss_fn, argnums=1, has_aux=True
+            )(key, optimizer.target)
+
+        grad_norm = np.sqrt(
+            jax.tree_util.tree_reduce(
+                lambda x, y: x + y,
+                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), batch_grad),
+            )
+                    )
+
+        batch_grad = jax.lax.cond(
+            grad_norm > FLAGS.grad_clip,
+            lambda grad_tree: jax.tree_util.tree_map(
+                lambda x: FLAGS.grad_clip * x / grad_norm, grad_tree
+            ),
+            lambda grad_tree: grad_tree,
+            batch_grad
+        )
+
+        if FLAGS.optimizer == "adahessian":
+            optimizer = optimizer.apply_gradient(batch_grad, batch_hess)
+        else:
+            optimizer = optimizer.apply_gradient(batch_grad)
+
+        return optimizer, loss, loss_aux, grad_norm
 
     @jax.jit
     def validation_losses(model):
@@ -164,18 +209,7 @@ def main(argv):
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
-            if FLAGS.optimizer == "adahessian":
-                k1, k2 = jax.random.split(subkey)
-                loss, loss_aux = batch_loss_fn(k1, optimizer.target)
-                batch_grad, batch_hess = grad_and_hessian(
-                    lambda model: batch_loss_fn(subkey, model)[0],
-                    (optimizer.target,),
-                    k2,
-                )
-            else:
-                (loss, loss_aux), batch_grad = jax.value_and_grad(
-                    batch_loss_fn, argnums=1, has_aux=True
-                )(subkey, optimizer.target)
+            optimizer, loss, loss_aux, grad_norm = train_step(subkey, optimizer)
 
             # ---- This big section is logging a bunch of debug stats
             # loss grad norms; plotting the sampled points; plotting the vals at those
@@ -187,6 +221,8 @@ def main(argv):
                 and step % FLAGS.measure_grad_norm_every == 0
             ):
                 loss_vals_and_grad_norms = get_grad_norms(subkey, optimizer.target)
+                loss_vals_and_grad_norms = {k: (float(v[0]), float(v[1]))
+                                            for k, v in loss_vals_and_grad_norms.items()}
                 print("loss vals and grad norms: ", loss_vals_and_grad_norms)
                 if tflogger is not None:
                     for k in loss_vals_and_grad_norms:
@@ -239,26 +275,6 @@ def main(argv):
                         tflogger.log_plots(
                             "Outputs dim {}".format(dim), [plt.gcf()], step
                         )
-
-            grad_norm = np.sqrt(
-                jax.tree_util.tree_reduce(
-                    lambda x, y: x + y,
-                    jax.tree_util.tree_map(lambda x: np.sum(x ** 2), batch_grad),
-                )
-            )
-
-            if np.isfinite(grad_norm):
-                if FLAGS.grad_clip is not None and grad_norm > FLAGS.grad_clip:
-                    log("clipping gradients with norm {}".format(grad_norm))
-                    batch_grad = jax.tree_util.tree_map(
-                        lambda x: FLAGS.grad_clip * x / grad_norm, batch_grad
-                    )
-                if FLAGS.optimizer == "adahessian":
-                    optimizer = optimizer.apply_gradient(batch_grad, batch_hess)
-                else:
-                    optimizer = optimizer.apply_gradient(batch_grad)
-            else:
-                log("NaN grad!")
 
         if step % FLAGS.val_every == 0:
             rmse, norms, rel_err, per_dim_rel_err = vmap_validation_error(

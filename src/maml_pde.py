@@ -126,7 +126,7 @@ def main(arvg):
 
     # --------------------- Defining the evaluation functions --------------------
 
-    # @partial(jax.jit, static_argnums=(3, 4))
+    @partial(jax.jit, static_argnums=(3, 4))
     def get_final_model(key, model_and_lrs, params, inner_steps, maml_def):
         # Input key is terminal
         model, inner_lrs = model_and_lrs
@@ -184,6 +184,32 @@ def main(arvg):
         )
         return losses, meta_losses
 
+    @jax.jit
+    def train_step(step, key, optimizer, inner_lr_state):
+        inner_lrs = inner_lr_get(inner_lr_state)
+
+        meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
+            maml_def, key, optimizer.target, inner_lrs,
+        )
+        meta_grad_norm = np.sqrt(
+            jax.tree_util.tree_reduce(
+                lambda x, y: x + y,
+                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad[0]),
+            )
+        )
+        meta_grad = jax.lax.cond(
+            meta_grad_norm > FLAGS.grad_clip,
+            lambda grad_tree: jax.tree_util.tree_map(
+                lambda x: FLAGS.grad_clip * x / meta_grad_norm, grad_tree
+            ),
+            lambda grad_tree: grad_tree,
+            meta_grad
+        )
+        optimizer = optimizer.apply_gradient(meta_grad[0])
+        inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
+        return optimizer, inner_lr_state, losses, meta_losses, meta_grad_norm
+
+
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 
     gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
@@ -199,28 +225,13 @@ def main(arvg):
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key, 2)
 
-        inner_lrs = inner_lr_get(inner_lr_state)
-
         with Timer() as t:
-            meta_grad, losses, meta_losses = maml.multi_task_grad_and_losses(
-                maml_def, subkey, optimizer.target, inner_lrs,
-            )
-            meta_grad_norm = np.sqrt(
-                jax.tree_util.tree_reduce(
-                    lambda x, y: x + y,
-                    jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad[0]),
-                )
-            )
-            if np.isfinite(meta_grad_norm):
-                if FLAGS.grad_clip is not None and meta_grad_norm > FLAGS.grad_clip:
-                    log("clipping gradients with norm {}".format(meta_grad_norm))
-                    meta_grad[0] = jax.tree_util.tree_map(
-                        lambda x: FLAGS.grad_clip * x / meta_grad_norm, meta_grad[0]
-                    )
-                optimizer = optimizer.apply_gradient(meta_grad[0])
-                inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
-            else:
-                log("NaN grad!")
+            (optimizer, inner_lr_state, losses,
+             meta_losses, meta_grad_norm) = train_step(
+                 step, subkey, optimizer, inner_lr_state
+             )
+
+        inner_lrs = inner_lr_get(inner_lr_state)
 
         if step % FLAGS.val_every == 0:
             val_error, per_dim_val_error = vmap_validation_error(
