@@ -258,9 +258,12 @@ def main(argv):
                     )
 
         if step % FLAGS.val_every == 0:
-            mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
-                optimizer.target, gt_params, coords, fenics_vals, make_coef_func
-            )
+            with Timer() as deploy_timer:
+                mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                    optimizer.target, gt_params, coords, fenics_vals, make_coef_func
+                )
+                mse.block_until_ready()
+            deployment_time = deploy_timer.interval
 
             val_loss = validation_losses(optimizer.target)
 
@@ -273,7 +276,7 @@ def main(argv):
             log(
                 "step: {}, loss: {}, val_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
-                "per_dim_rel_err: {}, grad_norm: {}, time: {}".format(
+                "per_dim_rel_err: {}, deployment_time: {}, grad_norm: {}, time: {}".format(
                     step,
                     loss,
                     val_loss,
@@ -282,6 +285,7 @@ def main(argv):
                     rel_err_std,
                     norms,
                     per_dim_rel_err,
+                    deployment_time,
                     grad_norm,
                     t.interval,
                 )

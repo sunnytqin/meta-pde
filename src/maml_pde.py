@@ -216,10 +216,13 @@ def main(arvg):
             inner_lrs = inner_lr_get(inner_lr_state)
 
         if step % FLAGS.val_every == 0:
-            mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
-                (optimizer.target, inner_lrs), gt_params, coords,
-                fenics_vals,
-                partial_make_coef_func)
+            with Timer() as deploy_timer:
+                mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                    (optimizer.target, inner_lrs), gt_params, coords,
+                    fenics_vals,
+                    partial_make_coef_func)
+                mse.block_until_ready()
+            deployment_time = deploy_timer.interval
 
             val_losses, val_meta_losses = validation_losses(
                 (optimizer.target, inner_lrs)
@@ -229,7 +232,7 @@ def main(arvg):
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
-                "per_dim_rel_err: {}, "
+                "per_dim_rel_err: {}, deployment_time: {},"
                 "meta_grad_norm: {}, time: {}, key: {}, subkey: {}".format(
                     step,
                     np.mean(meta_losses[0]),
@@ -239,6 +242,7 @@ def main(arvg):
                     rel_err_std,
                     norms,
                     per_dim_rel_err,
+                    deployment_time,
                     meta_grad_norm,
                     t.interval,
                     key,
