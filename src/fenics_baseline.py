@@ -35,14 +35,14 @@ FLAGS = flags.FLAGS
 # parser = argparse.ArgumentParser()
 flags.DEFINE_string(
     "test_resolutions",
-    "1,2,4,6,9,12",
+    "1,2,3,4,5,6,8,10,12",
     "mesh resolutions for fenics baseline. expect comma sep ints",
 )
 
 
 def main(argv):
     if FLAGS.out_dir is None:
-        FLAGS.out_dir = FLAGS.pde + "_nn_results"
+        FLAGS.out_dir = FLAGS.pde + "_fenics_results"
 
     pde = get_pde(FLAGS.pde)
 
@@ -101,7 +101,7 @@ def main(argv):
     pdb.set_trace()
 
     for res in test_resolutions:
-        print("res: {}, rel_mse: {}, std_rel_mse: {}, time: {}".format(
+        log("res: {}, rel_mse: {}, std_rel_mse: {}, time: {}".format(
             res, np.mean(errs[res][0]/errs[res][1]),
             np.std(np.mean(errs[res][0]/errs[res][1], axis=(1,2))),
             times[res]

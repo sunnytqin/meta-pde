@@ -128,6 +128,12 @@ def solve_fenics(params, boundary_points=32, resolution=32):
             - p * fa.div(v) * fa.dx
             + q * fa.div(u) * fa.dx
         )
+        solver_parameters = {
+            "newton_solver": {
+                "maximum_iterations": FLAGS.max_newton_steps,
+                "relaxation_parameter": FLAGS.relaxation_parameter,
+                "linear_solver": "mumps",
+            }
 
     else:
         F = (
@@ -138,18 +144,18 @@ def solve_fenics(params, boundary_points=32, resolution=32):
             * fa.dx  # Pressure varies on 100x scale of velocity
             + q * fa.div(u) * fa.dx
         )
+        solver_parameters = {
+            "newton_solver": {
+                "maximum_iterations": FLAGS.max_newton_steps,
+                "linear_solver": "mumps",
+            }
 
     try:
         fa.solve(
             F == 0,
             u_p,
             [bc_walls, bc_in, bc_out],
-            solver_parameters={
-                "newton_solver": {
-                    "maximum_iterations": FLAGS.max_newton_steps,
-                    "relaxation_parameter": FLAGS.relaxation_parameter,
-                    "linear_solver": "mumps",
-                }
+            solver_parameters=solver_parameters
             },
         )
     except Exception as e:
