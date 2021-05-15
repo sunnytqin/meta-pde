@@ -17,6 +17,7 @@ from .tensorboard_logger import Logger as TFLogger
 
 import flaxOptimizers
 from adahessianJax.flaxOptimizer import Adahessian
+from functools import partial
 
 import fenics as fa
 
