@@ -222,7 +222,7 @@ def main(arvg):
                     fenics_vals,
                     partial_make_coef_func)
                 mse.block_until_ready()
-            deployment_time = deploy_timer.interval
+            deployment_time = deploy_timer.interval / FLAGS.n_eval
 
             val_losses, val_meta_losses = validation_losses(
                 (optimizer.target, inner_lrs)
