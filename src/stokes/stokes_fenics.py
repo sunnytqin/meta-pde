@@ -133,7 +133,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
                 "maximum_iterations": FLAGS.max_newton_steps,
                 "relaxation_parameter": FLAGS.relaxation_parameter,
                 "linear_solver": "mumps",
-            }
+            }}
 
     else:
         F = (
@@ -148,15 +148,14 @@ def solve_fenics(params, boundary_points=32, resolution=32):
             "newton_solver": {
                 "maximum_iterations": FLAGS.max_newton_steps,
                 "linear_solver": "mumps",
-            }
+            }}
 
     try:
         fa.solve(
             F == 0,
             u_p,
             [bc_walls, bc_in, bc_out],
-            solver_parameters=solver_parameters
-            },
+            solver_parameters=solver_parameters,
         )
     except Exception as e:
         print("Failed solve: ", e)
