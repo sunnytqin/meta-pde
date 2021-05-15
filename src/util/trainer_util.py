@@ -7,6 +7,7 @@ Also try move more functions in here."""
 
 import jax
 import jax.numpy as np
+from jax import vmap
 import numpy as npo
 import matplotlib.pyplot as plt
 import flax
@@ -173,7 +174,7 @@ def prepare_logging(out_dir, expt_name):
     return path, log, tflogger
 
 
-@partial(jax.jit, static_argnums=-1)
+@partial(jax.jit, static_argnums=4)
 def vmap_validation_error(
     model, ground_truth_params, points, ground_truth_vals, make_coef_func,
 ):

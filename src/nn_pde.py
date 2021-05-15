@@ -273,7 +273,7 @@ def main(argv):
             log(
                 "step: {}, loss: {}, val_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
-                "per_dim_val_error: {}, grad_norm: {}, time: {}".format(
+                "per_dim_rel_err: {}, grad_norm: {}, time: {}".format(
                     step,
                     loss,
                     val_loss,
