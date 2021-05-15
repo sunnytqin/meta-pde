@@ -136,6 +136,8 @@ def main(argv):
 
         return np.squeeze(final_model(coords))
 
+    partial_make_coef_func = lambda key, model, params, coords: make_coef_func(
+            key, model, params, coords, leap_def.inner_steps, leap_def)
 
     @jax.jit
     def validation_losses(model, leap_def=leap_def):
@@ -191,8 +193,7 @@ def main(argv):
             mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
                 optimizer.target, gt_params, coords,
                 fenics_vals,
-                lambda key, model, params, coords: make_coef_func(
-                    key, model, params, coords, leap_def.inner_steps, leap_def))
+                partial_make_coef_func)
 
 
             val_losses = validation_losses(optimizer.target)

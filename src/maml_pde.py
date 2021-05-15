@@ -156,6 +156,9 @@ def main(arvg):
 
         return np.squeeze(final_model(coords))
 
+    partial_make_coef_func = lambda key, model_and_lrs, params, coords: make_coef_func(
+        key, model_and_lrs, params, coords, maml_def.inner_steps, maml_def)
+
     @jax.jit
     def validation_losses(model_and_lrs, maml_def=maml_def):
         model, inner_lrs = model_and_lrs
@@ -216,8 +219,7 @@ def main(arvg):
             mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
                 (optimizer.target, inner_lrs), gt_params, coords,
                 fenics_vals,
-                lambda key, model_and_lrs, params, coords: make_coef_func(
-                    key, model_and_lrs, params, coords, maml_def.inner_steps, maml_def))
+                partial_make_coef_func)
 
             val_losses, val_meta_losses = validation_losses(
                 (optimizer.target, inner_lrs)
