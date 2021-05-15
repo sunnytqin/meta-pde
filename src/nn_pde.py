@@ -129,29 +129,7 @@ def main(argv):
 
         return np.squeeze(final_model(coords))
 
-    @jax.jit
-    def vmap_validation_error(
-        model, ground_truth_params, points, ground_truth_vals,
-    ):
-        key = jax.random.PRNGKey(0)
-        keys = jax.random.split(key, FLAGS.n_eval)
 
-        coefs = vmap(make_coef_func, (0, None, 0, 0))(
-            keys, model, ground_truth_params, points
-        )
-        coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
-        ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
-        err = coefs - ground_truth_vals
-        rmse = np.sqrt(np.mean(err ** 2))
-        normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
-        rel_sq_err = err ** 2 / normalizer
-
-        return (
-            rmse,
-            np.sqrt(np.mean(normalizer, axis=(0, 1))),
-            np.sqrt(np.mean(rel_sq_err)),
-            np.sqrt(np.mean(rel_sq_err, axis=(0, 1))),
-        )
 
     @jax.jit
     def train_step(key, optimizer):
@@ -280,8 +258,8 @@ def main(argv):
                     )
 
         if step % FLAGS.val_every == 0:
-            rmse, norms, rel_err, per_dim_rel_err = vmap_validation_error(
-                optimizer.target, gt_params, coords, fenics_vals,
+            mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                optimizer.target, gt_params, coords, fenics_vals, make_coef_func
             )
 
             val_loss = validation_losses(optimizer.target)
@@ -293,14 +271,15 @@ def main(argv):
             time_last_log = time.time()
 
             log(
-                "step: {}, loss: {}, val_loss: {}, val_rmse: {}, "
-                "val_rel_err: {}, val_true_norms: {}, "
+                "step: {}, loss: {}, val_loss: {}, val_mse: {}, "
+                "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
                 "per_dim_val_error: {}, grad_norm: {}, time: {}".format(
                     step,
                     loss,
                     val_loss,
-                    rmse,
+                    mse,
                     rel_err,
+                    rel_err_std,
                     norms,
                     per_dim_rel_err,
                     grad_norm,
@@ -315,8 +294,10 @@ def main(argv):
                 tflogger.log_scalar("meta_loss", float(np.mean(loss)), step)
                 tflogger.log_scalar("val_loss", float(np.mean(val_loss)), step)
 
-                tflogger.log_scalar("val_rel_rmse", float(rel_err), step)
-                tflogger.log_scalar("val_rmse", float(rmse), step)
+                tflogger.log_scalar("val_rel_mse", float(rel_err), step)
+                tflogger.log_scalar("std_val_rel_mse", float(rel_err_std), step)
+
+                tflogger.log_scalar("val_mse", float(mse), step)
 
                 for i in range(len(per_dim_rel_err)):
                     tflogger.log_scalar(

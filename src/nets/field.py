@@ -160,7 +160,7 @@ def nf_apply(
             x = nonlinearity(a* omega)
         else:
             x = nonlinearity(a)
-    out = flax.nn.Dense(x, out_dim, kernel_init=flax.nn.initializers.orthogonal(),
+    out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init,
                         bias_init=flax.nn.initializers.zeros)
     # out = flax.nn.Dense(out, out_dim, bias_init=flax.nn.initializers.zeros)
     return out  # dewhiten(out, mean_y, std_y)

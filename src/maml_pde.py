@@ -157,27 +157,6 @@ def main(arvg):
         return np.squeeze(final_model(coords))
 
     @jax.jit
-    def vmap_validation_error(
-        model_and_lrs, ground_truth_params, points, ground_truth_vals,
-    ):
-        key = jax.random.PRNGKey(0)
-        keys = jax.random.split(key, FLAGS.n_eval)
-        coefs = vmap(make_coef_func, (0, None, 0, 0, None, None))(
-            keys,
-            model_and_lrs,
-            ground_truth_params,
-            points,
-            maml_def.inner_steps,
-            maml_def,
-        )
-        coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
-        ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
-        err = coefs - ground_truth_vals
-        rel_sq_err = err ** 2 / np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
-
-        return np.sqrt(np.mean(rel_sq_err)), np.sqrt(np.mean(rel_sq_err, axis=(0, 1)))
-
-    @jax.jit
     def validation_losses(model_and_lrs, maml_def=maml_def):
         model, inner_lrs = model_and_lrs
         _, losses, meta_losses = maml.multi_task_grad_and_losses(
@@ -234,9 +213,11 @@ def main(arvg):
             inner_lrs = inner_lr_get(inner_lr_state)
 
         if step % FLAGS.val_every == 0:
-            val_error, per_dim_val_error = vmap_validation_error(
-                (optimizer.target, inner_lrs), gt_params, coords, fenics_vals,
-            )
+            mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                (optimizer.target, inner_lrs), gt_params, coords,
+                fenics_vals, partial(make_coef_func,
+                                     inner_steps=maml_def.inner_steps,
+                                     maml_def=maml_def))
 
             val_losses, val_meta_losses = validation_losses(
                 (optimizer.target, inner_lrs)
@@ -244,12 +225,18 @@ def main(arvg):
 
         if step % FLAGS.log_every == 0:
             log(
-                "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
+                "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
+                "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
+                "per_dim_val_error: {}, "
                 "meta_grad_norm: {}, time: {}, key: {}, subkey: {}".format(
                     step,
                     np.mean(meta_losses[0]),
                     np.mean(val_meta_losses[0]),
-                    val_error,
+                    mse,
+                    rel_err,
+                    rel_err_std,
+                    norms,
+                    per_dim_val_error,
                     meta_grad_norm,
                     t.interval,
                     key,
@@ -280,10 +267,16 @@ def main(arvg):
                     tflogger.log_scalar(
                         "meta_" + k, float(np.mean(meta_losses[1][k])), step
                     )
-                for i in range(len(per_dim_val_error)):
+                tflogger.log_scalar("val_rel_mse", float(rel_err), step)
+                tflogger.log_scalar("std_val_rel_mse", float(rel_err_std), step)
+
+                tflogger.log_scalar("val_mse", float(mse), step)
+
+                for i in range(len(per_dim_rel_err)):
                     tflogger.log_scalar(
-                        "val_error_dim_{}".format(i), float(per_dim_val_error[i]), step
+                        "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
                     )
+                    tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
                 for inner_step in range(FLAGS.inner_steps + 1):
                     tflogger.log_scalar(
                         "loss_step_{}".format(inner_step),
@@ -311,7 +304,6 @@ def main(arvg):
                             float(np.mean(losses[1][k][:, inner_step])),
                             step,
                         )
-                tflogger.log_scalar("val_error", float(val_error), step)
                 tflogger.log_scalar("meta_grad_norm", float(meta_grad_norm), step)
                 tflogger.log_scalar("step_time", t.interval, step)
 

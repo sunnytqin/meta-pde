@@ -172,6 +172,32 @@ def prepare_logging(out_dir, expt_name):
     return path, log, tflogger
 
 
+@partial(jax.jit, static_argnums=-1)
+def vmap_validation_error(
+    model, ground_truth_params, points, ground_truth_vals, make_coef_func,
+):
+    key = jax.random.PRNGKey(0)
+    keys = jax.random.split(key, FLAGS.n_eval)
+
+    coefs = vmap(make_coef_func, (0, None, 0, 0))(
+        keys, model, ground_truth_params, points
+    )
+    coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
+    ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
+    err = coefs - ground_truth_vals
+    mse = np.mean(err ** 2)
+    normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
+    rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
+
+    return (
+        mse,
+        np.mean(normalizer, axis=(0, 1)),
+        np.mean(rel_sq_err),
+        np.mean(rel_sq_err, axis=(0, 1)),
+        np.std(np.mean(rel_sq_err, axis=(1, 2)))
+    )
+
+
 def get_optimizer(model_class, init_params):
     if FLAGS.optimizer == "adam":
         optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta2=0.99).create(

@@ -136,26 +136,6 @@ def main(argv):
 
         return np.squeeze(final_model(coords))
 
-    @jax.jit
-    def vmap_validation_error(
-        model_and_lrs, ground_truth_params, points, ground_truth_vals,
-    ):
-        key = jax.random.PRNGKey(0)
-        keys = jax.random.split(key, FLAGS.n_eval)
-        coefs = vmap(make_coef_func, (0, None, 0, 0, None, None))(
-            keys,
-            model_and_lrs,
-            ground_truth_params,
-            points,
-            leap_def.inner_steps,
-            leap_def,
-        )
-        coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
-        ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
-        err = coefs - ground_truth_vals
-        rel_sq_err = err ** 2 / np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
-
-        return np.sqrt(np.mean(rel_sq_err)), np.sqrt(np.mean(rel_sq_err, axis=(0, 1)))
 
     @jax.jit
     def validation_losses(model, leap_def=leap_def):
@@ -208,22 +188,33 @@ def main(argv):
             optimizer, losses, meta_grad_norm = train_step(subkey, optimizer)
 
         if step % FLAGS.val_every == 0:
-            val_error, per_dim_val_error = vmap_validation_error(
-                optimizer.target, gt_params, coords, fenics_vals,
-            )
+            mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                optimizer.target, gt_params, coords,
+                fenics_vals, partial(make_coef_func,
+                                     inner_steps=leap_def.inner_steps,
+                                     leap_def=leap_def))
+
 
             val_losses = validation_losses(optimizer.target)
 
         if step % FLAGS.log_every == 0:
             log(
-                "step: {}, meta_loss: {}, val_meta_loss: {}, val_err: {}, "
-                "meta_grad_norm: {}, time: {}".format(
+                "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
+                "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
+                "per_dim_val_error: {}, "
+                "meta_grad_norm: {}, time: {}, key: {}, subkey: {}".format(
                     step,
                     np.mean(losses[0][:, -1]),
                     np.mean(val_losses[0][:, -1]),
-                    val_error,
+                    mse,
+                    rel_err,
+                    rel_err_std,
+                    norms,
+                    per_dim_val_error,
                     meta_grad_norm,
                     t.interval,
+                    key,
+                    subkey,
                 )
             )
             if step > 0:
@@ -248,10 +239,16 @@ def main(argv):
                 tflogger.log_histogram("batch_val_losses", val_losses[0][:, -1], step)
                 tflogger.log_scalar("meta_loss", float(np.mean(losses[0][:, -1])), step)
                 tflogger.log_scalar("val_loss", float(np.mean(val_losses[0][:, -1])), step)
-                for i in range(len(per_dim_val_error)):
+                tflogger.log_scalar("val_rel_mse", float(rel_err), step)
+                tflogger.log_scalar("std_val_rel_mse", float(rel_err_std), step)
+
+                tflogger.log_scalar("val_mse", float(mse), step)
+
+                for i in range(len(per_dim_rel_err)):
                     tflogger.log_scalar(
-                        "val_error_dim_{}".format(i), float(per_dim_val_error[i]), step
+                        "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
                     )
+                    tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
                 for k in losses[1]:
                     tflogger.log_scalar(
                         "meta_" + k, float(np.mean(losses[1][k][:, -1])), step
@@ -283,7 +280,6 @@ def main(argv):
                             float(np.mean(losses[1][k][:, inner_step])),
                             step,
                         )
-                tflogger.log_scalar("val_error", float(val_error), step)
                 tflogger.log_scalar("meta_grad_norm", float(meta_grad_norm), step)
                 tflogger.log_scalar("step_time", t.interval, step)
 
