@@ -61,7 +61,7 @@ def main(argv):
 
     def loss_fn(field_fn, points, params, bc_weights):
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
-        if bc_weights == None:
+        if bc_weights is None:
             loss = np.sum(
                 np.array([bl for bl in boundary_losses.values()])
             ) + np.sum(
@@ -109,7 +109,7 @@ def main(argv):
         _, loss_dict = batch_loss_fn(key, model, None)
         bc_weights = {}
 
-        for k in loss_dict:  # literally just traverse thru the loss names
+        for k in loss_dict:
             single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][k]
             _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
             if k == FLAGS.domain_loss:
@@ -128,7 +128,7 @@ def main(argv):
         for k in bc_weights:
             bc_weights[k] = domain_loss_grad_max/bc_weights[k]
 
-        if bc_weights_prev != None:
+        if bc_weights_prev is not None:
             bc_weights[k] = (1 - FLAGS.annealing_alpha) * bc_weights_prev[k] +\
                             FLAGS.annealing_alpha * bc_weights[k]
 
@@ -172,8 +172,7 @@ def main(argv):
     @jax.jit
     def train_step(key, optimizer, bc_weights_prev):
         if FLAGS.annealing:
-            k1, k2 = jax.random.split(key)
-            bc_weights = get_annealing_weights(k1, optimizer.target, bc_weights_prev)
+            bc_weights = get_annealing_weights(key, optimizer.target, bc_weights_prev)
             assert(bc_weights != None)
         else:
             bc_weights = None
@@ -236,7 +235,6 @@ def main(argv):
         key, subkey = jax.random.split(key)
         with Timer() as t:
             optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, bc_weights)
-
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
         # points; plotting the losses at those points.
@@ -251,10 +249,11 @@ def main(argv):
                                         for k, v in loss_vals_and_grad_norms.items()}
             log("loss vals and grad norms: ", loss_vals_and_grad_norms)
             if FLAGS.annealing:
-                bc_weights = get_annealing_weights(subkey, optimizer.target, bc_weights)
-                bc_weights = {k: float(v)
-                          for k, v in bc_weights.items()}
-            log("bc weigths for annealing: ", bc_weights)
+                bc_weights = {k: float(v)for k, v in bc_weights.items()}
+                log("bc weigths for annealing: ", bc_weights)
+                if step > 0:
+                    assert(bc_weights != None )
+
             if tflogger is not None:
                 for k in loss_vals_and_grad_norms:
                     tflogger.log_scalar(
