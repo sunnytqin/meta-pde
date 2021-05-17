@@ -46,6 +46,7 @@ flags.DEFINE_integer(
 flags.DEFINE_boolean("vary_source", True, "")
 flags.DEFINE_boolean("vary_bc", True, "")
 flags.DEFINE_boolean("vary_geometry", True, "")
+flags.DEFINE_string("domain_loss", None, "")
 
 # Seed
 flags.DEFINE_integer("seed", 0, "set random seed")
@@ -69,6 +70,9 @@ flags.DEFINE_float("siren_omega0", 3.0, "siren_omega0")
 flags.DEFINE_integer("viz_every", int(1e5), "plot every N steps")
 flags.DEFINE_integer("val_every", int(1e2), "validate every N steps")
 flags.DEFINE_integer("log_every", int(1e3), "tflog every N steps")
-flags.DEFINE_integer("measure_grad_norm_every", int(1e4), "")
+flags.DEFINE_integer("measure_grad_norm_every", int(1e3), "")
 
-flags.DEFINE_string("optimizer", "ranger", help="adam or ranger, currently no adahess")
+flags.DEFINE_string("optimizer", "ranger", "adam or ranger, currently no adahess")
+
+flags.DEFINE_boolean("annealing", True, "annealing bc losses")
+flags.DEFINE_float("annealing_alpha", 0.75, "annealing smoothing param")

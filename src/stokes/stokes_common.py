@@ -153,7 +153,7 @@ def loss_fn(field_fn, points, params):
         },
         {
             "loss_stress": np.mean(loss_stress_fn(field_fn, points_in_domain, params)),
-            "loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
+            #"loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
         },
     )
 

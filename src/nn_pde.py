@@ -59,35 +59,41 @@ def main(argv):
 
     # --------------------- Defining the training algorithm --------------------
 
-    def loss_fn(field_fn, points, params):
+    def loss_fn(field_fn, points, params, bc_weights):
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
-
-        loss = FLAGS.bc_weight * np.sum(
-            np.array([bl for bl in boundary_losses.values()])
-        ) + np.sum(np.array([dl for dl in domain_losses.values()]))
+        if bc_weights == None:
+            loss = np.sum(
+                np.array([bl for bl in boundary_losses.values()])
+            ) + np.sum(
+                np.array([dl for dl in domain_losses.values()]))
+        else:
+            loss = np.sum(
+                np.array([bc_weights[k] * bl for k, bl in boundary_losses.items()])
+            ) + np.sum(
+                np.array([dl for dl in domain_losses.values()]))
 
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
 
-    def task_loss_fn(key, model):
+    def task_loss_fn(key, model, bc_weights):
         # The input key is terminal
         k1, k2 = jax.random.split(key, 2)
         params = pde.sample_params(k1)
         points = pde.sample_points(k2, FLAGS.outer_points, params)
-        return loss_fn(model, points, params)
+        return loss_fn(model, points, params, bc_weights)
 
     @jax.jit
-    def batch_loss_fn(key, model):
+    def batch_loss_fn(key, model, bc_weights):
         keys = jax.random.split(key, FLAGS.bsize)
-        losses, aux = jax.vmap(task_loss_fn, (0, None))(keys, model)
+        losses, aux = jax.vmap(task_loss_fn, (0, None, None))(keys, model, bc_weights)
         return np.sum(losses), {k: np.sum(v) for k, v in aux.items()}
 
     @jax.jit
     def get_grad_norms(key, model):
-        _, loss_dict = batch_loss_fn(key, model)
+        _, loss_dict = batch_loss_fn(key, model, None)
         losses_and_grad_norms = {}
         for k in loss_dict:
-            single_loss_fn = lambda model: batch_loss_fn(key, model)[1][k]
+            single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][k]
             loss_val, loss_grad = jax.value_and_grad(single_loss_fn)(model)
             loss_grad_norm = np.sqrt(
                 jax.tree_util.tree_reduce(
@@ -97,6 +103,36 @@ def main(argv):
             )
             losses_and_grad_norms[k] = (loss_val, loss_grad_norm)
         return losses_and_grad_norms
+
+    @jax.jit
+    def get_annealing_weights(key, model, bc_weights_prev=None):
+        _, loss_dict = batch_loss_fn(key, model, None)
+        bc_weights = {}
+
+        for k in loss_dict:  # literally just traverse thru the loss names
+            single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][k]
+            _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
+            if k == FLAGS.domain_loss:
+                domain_loss_grad_max = np.max(
+                    np.array(jax.tree_flatten(
+                    jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                    )
+                )
+            else:
+                loss_grad_mean = np.mean(
+                    np.array(jax.tree_flatten(
+                        jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                    )
+                )
+                bc_weights[k] = loss_grad_mean
+        for k in bc_weights:
+            bc_weights[k] = domain_loss_grad_max/bc_weights[k]
+
+        if bc_weights_prev != None:
+            bc_weights[k] = (1 - FLAGS.annealing_alpha) * bc_weights_prev[k] +\
+                            FLAGS.annealing_alpha * bc_weights[k]
+
+        return bc_weights
 
     Field = pde.BaseField.partial(
         sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
@@ -111,6 +147,8 @@ def main(argv):
     _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
+
+    bc_weights = None
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -132,19 +170,26 @@ def main(argv):
 
 
     @jax.jit
-    def train_step(key, optimizer):
+    def train_step(key, optimizer, bc_weights_prev):
+        if FLAGS.annealing:
+            k1, k2 = jax.random.split(key)
+            bc_weights = get_annealing_weights(k1, optimizer.target, bc_weights_prev)
+            assert(bc_weights != None)
+        else:
+            bc_weights = None
+
         if FLAGS.optimizer == "adahessian":
             k1, k2 = jax.random.split(key)
-            loss, loss_aux = batch_loss_fn(k1, optimizer.target)
+            loss, loss_aux = batch_loss_fn(k1, optimizer.target, bc_weights)
             batch_grad, batch_hess = grad_and_hessian(
-                lambda model: batch_loss_fn(k1, model)[0],
+                lambda model: batch_loss_fn(k1, model, bc_weights)[0],
                 (optimizer.target,),
                 k2,
             )
         else:
             (loss, loss_aux), batch_grad = jax.value_and_grad(
                 batch_loss_fn, argnums=1, has_aux=True
-            )(key, optimizer.target)
+            )(key, optimizer.target, bc_weights)
 
         grad_norm = np.sqrt(
             jax.tree_util.tree_reduce(
@@ -167,11 +212,11 @@ def main(argv):
         else:
             optimizer = optimizer.apply_gradient(batch_grad)
 
-        return optimizer, loss, loss_aux, grad_norm
+        return optimizer, loss, loss_aux, grad_norm, bc_weights
 
     @jax.jit
     def validation_losses(model):
-        return task_loss_fn(jax.random.PRNGKey(0), model)[0]
+        return task_loss_fn(jax.random.PRNGKey(0), model, None)[0]
 
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 
@@ -190,7 +235,7 @@ def main(argv):
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
-            optimizer, loss, loss_aux, grad_norm = train_step(subkey, optimizer)
+            optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, bc_weights)
 
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
@@ -205,6 +250,11 @@ def main(argv):
             loss_vals_and_grad_norms = {k: (float(v[0]), float(v[1]))
                                         for k, v in loss_vals_and_grad_norms.items()}
             log("loss vals and grad norms: ", loss_vals_and_grad_norms)
+            if FLAGS.annealing:
+                bc_weights = get_annealing_weights(subkey, optimizer.target, bc_weights)
+                bc_weights = {k: float(v)
+                          for k, v in bc_weights.items()}
+            log("bc weigths for annealing: ", bc_weights)
             if tflogger is not None:
                 for k in loss_vals_and_grad_norms:
                     tflogger.log_scalar(
@@ -343,8 +393,8 @@ def main(argv):
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
-    if FLAGS.expt_name is not None:
-        outfile.close()
+    #if FLAGS.expt_name is not None:
+    #    outfile.close()
 
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
