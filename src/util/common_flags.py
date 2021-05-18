@@ -76,3 +76,7 @@ flags.DEFINE_string("optimizer", "ranger", "adam or ranger, currently no adahess
 
 flags.DEFINE_boolean("annealing", True, "annealing bc losses")
 flags.DEFINE_float("annealing_alpha", 0.75, "annealing smoothing param")
+
+flags.DEFINE_boolean("pcgrad", True, "perform PC grad")
+flags.DEFINE_float("pcgrad_norm", 1.0, "PC grad multiplier")
+

@@ -134,6 +134,33 @@ def main(argv):
 
         return bc_weights
 
+    @jax.jit
+    def perform_pcgrad(key, model, loss_dict):
+        project = partial(pcgrad.project_grads, FLAGS.pcgrad_norm)
+        loss_grads = {}
+        # get loss grad for each loss type
+        for k in loss_dict:
+            single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][k]
+            _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
+            loss_grads[k] = loss_grad
+
+        # perform PC grad for each loss type
+        loss_grads_new = [np.zeros_like(x) for x in jax.tree_flatten(loss_grad)[0]]
+        for k in loss_grads:
+            grad = loss_grads[k]
+            other_grads = {k1: v1 for k1, v1 in loss_grads.items() if k1 != k}
+            loss_grad_new = jax.tree_multimap(
+                project, grad, *other_grads.values()
+            )
+            loss_grad_new_flat, treedef = jax.tree_flatten(loss_grad_new)
+            loss_grads_new = [x + y for x, y in zip(loss_grad_new_flat, loss_grads_new)]
+
+        total_grad = jax.tree_unflatten(
+            treedef, loss_grads_new
+        )
+
+        return total_grad
+
     Field = pde.BaseField.partial(
         sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
         dense_args=(),
@@ -189,6 +216,10 @@ def main(argv):
             (loss, loss_aux), batch_grad = jax.value_and_grad(
                 batch_loss_fn, argnums=1, has_aux=True
             )(key, optimizer.target, bc_weights)
+
+        # project gradients using PC grad
+        if FLAGS.pcgrad:
+            batch_grad = perform_pcgrad(key, optimizer.target, loss_aux)
 
         grad_norm = np.sqrt(
             jax.tree_util.tree_reduce(
