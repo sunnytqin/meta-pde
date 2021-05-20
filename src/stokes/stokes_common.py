@@ -93,6 +93,14 @@ def loss_divu_fn(field_fn, points_in_domain, params):
     return div_u ** 2
 
 
+def loss_neumann_fn(field_fn, points_on_outlet, params):
+    u = get_u(field_fn)
+    dudx1 = lambda x: jax.jacfwd(u)(x.reshape(2))[:, 0]
+    dudx1_all = jax.vmap(dudx1)(points_on_outlet)
+    return np.mean(dudx1_all **2, axis=1)
+
+
+
 def loss_stress_fn(field_fn, points_in_domain, params):
     # force div(grad(u) - p * I) = 0
     source_params, bc_params, per_hole_params, n_holes = params
@@ -150,6 +158,7 @@ def loss_fn(field_fn, points, params):
             "loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
             "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params)),
             "loss_p_outlet": np.mean(p_outlet ** 2),
+            "loss_neumann_outlet": np.mean(loss_neumann_fn(field_fn, points_on_outlet, params))
         },
         {
             "loss_stress": np.mean(loss_stress_fn(field_fn, points_in_domain, params)),

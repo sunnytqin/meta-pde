@@ -75,4 +75,6 @@ flags.DEFINE_integer("measure_grad_norm_every", int(1e3), "")
 flags.DEFINE_string("optimizer", "ranger", "adam or ranger, currently no adahess")
 
 flags.DEFINE_boolean("annealing", True, "annealing bc losses")
-flags.DEFINE_float("annealing_alpha", 0.75, "annealing smoothing param")
+flags.DEFINE_boolean("annealing_l2", False, "anneal losses in l2 norm")
+
+flags.DEFINE_float("annealing_alpha", 0.95, "annealing smoothing param")

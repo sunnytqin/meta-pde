@@ -113,17 +113,31 @@ def main(argv):
             single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][k]
             _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
             if k == FLAGS.domain_loss:
-                domain_loss_grad_max = np.max(
-                    np.array(jax.tree_flatten(
-                    jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                if FLAGS.annealing_l2:
+                    domain_loss_grad_max = np.sum(
+                        np.array(jax.tree_flatten(
+                        jax.tree_util.tree_map(lambda x: np.sum(x), loss_grad))[0]
+                        )
                     )
-                )
-            else:
-                loss_grad_mean = np.mean(
-                    np.array(jax.tree_flatten(
+                else:
+                    domain_loss_grad_max = np.max(
+                        np.array(jax.tree_flatten(
                         jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                        )
                     )
-                )
+            else:
+                if FLAGS.annealing_l2:
+                    loss_grad_mean = np.sum(
+                        np.array(jax.tree_flatten(
+                            jax.tree_util.tree_map(lambda x: np.sum(x**2), loss_grad))[0]
+                        )
+                    )
+                else:
+                    loss_grad_mean = np.sum(
+                        np.array(jax.tree_flatten(
+                            jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                        )
+                    )
                 bc_weights[k] = loss_grad_mean
         for k in bc_weights:
             bc_weights[k] = domain_loss_grad_max/bc_weights[k]
