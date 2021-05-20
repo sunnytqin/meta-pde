@@ -83,34 +83,31 @@ def main(argv):
         keys = jax.random.split(key, FLAGS.bsize)
         _, loss_dict = vmap_task_loss_fn(keys, model)
 
-        bc_weights = defaultdict(lambda: 1.0)
-        loss_aux = {}
+        loss_aux = {}  # store original loss by loss type
+        loss_grads = {}  # store original loss gradient by loss type
+
+        # get original gradients
         for k in loss_dict:
             loss_aux[k] = np.sum(loss_dict[k])
-            # do nothing if not annealing
-            if not FLAGS.annealing or bc_weights_prev is None:
+            # do nothing if not annealing and not pcgrad-ing
+            if ((not FLAGS.annealing and not FLAGS.pcgrad) \
+                    or bc_weights_prev is None):
                 continue
             single_loss_fn = lambda model: np.sum(vmap_task_loss_fn(keys, model)[1][k])
-
             _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
-            if k == FLAGS.domain_loss:
-                domain_loss_grad_max = np.max(
-                    np.array(jax.tree_flatten(
-                        jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
-                             )
-                )
-            else:
-                loss_grad_mean = np.mean(
-                    np.array(jax.tree_flatten(
-                        jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
-                             )
-                )
-                bc_weights[k] = loss_grad_mean
-        for k in loss_dict:
-            if not FLAGS.annealing or bc_weights_prev is None or k == FLAGS.domain_loss:
-                continue
-            bc_weights[k] = (1 - FLAGS.annealing_alpha) * bc_weights_prev[k] +\
-                            FLAGS.annealing_alpha * (domain_loss_grad_max / bc_weights[k])
+            loss_grads[k] = loss_grad
+
+        # perform PC grad
+        if FLAGS.pcgrad and bc_weights_prev is not None:
+            # place holder for new total loss gradient
+            total_grad_new = [np.zeros_like(x)
+                              for x in jax.tree_flatten(loss_grad)[0]]
+            _, loss_grads = perform_pcgrad(loss_grads, total_grad_new)
+
+        # perform weight annealing
+        bc_weights = defaultdict(lambda: 1.0)
+        if FLAGS.annealing and bc_weights_prev is not None:
+            bc_weights = perform_annealing(loss_grads, bc_weights_prev)
 
         # recompute loss
         loss = np.sum(np.array([bc_weights[k] * v for k, v in loss_aux.items()]))
@@ -135,31 +132,55 @@ def main(argv):
 
 
     @jax.jit
-    def perform_pcgrad(key, model, loss_dict):
+    def perform_pcgrad(loss_grads, total_grad_new):
+        # define projection function
         project = partial(pcgrad.project_grads, FLAGS.pcgrad_norm)
-        loss_grads = {}
-        # get loss grad for each loss type
-        for k in loss_dict:
-            single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][k]
-            _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
-            loss_grads[k] = loss_grad
+
+        # for new individual loss gradient
+        loss_grads_new = {}
 
         # perform PC grad for each loss type
-        loss_grads_new = [np.zeros_like(x) for x in jax.tree_flatten(loss_grad)[0]]
         for k in loss_grads:
             grad = loss_grads[k]
             other_grads = {k1: v1 for k1, v1 in loss_grads.items() if k1 != k}
             loss_grad_new = jax.tree_multimap(
                 project, grad, *other_grads.values()
             )
+            # update the new projected individual loss function
+            loss_grads_new[k] = loss_grad_new
             loss_grad_new_flat, treedef = jax.tree_flatten(loss_grad_new)
-            loss_grads_new = [x + y for x, y in zip(loss_grad_new_flat, loss_grads_new)]
+            # update gradient for the entire loss function
+            total_grad_new = [x + y for x, y in zip(loss_grad_new_flat, total_grad_new)]
 
-        total_grad = jax.tree_unflatten(
-            treedef, loss_grads_new
+
+        total_grad_new = jax.tree_unflatten(
+            treedef, total_grad_new
         )
 
-        return total_grad
+        return total_grad_new, loss_grads_new
+
+    @jax.jit
+    def perform_annealing(loss_grads, bc_weights_prev):
+        for k, loss_grad in loss_grads.items():
+            if k == FLAGS.domain_loss:
+                domain_loss_grad_max = np.max(
+                    np.array(jax.tree_flatten(
+                        jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                             )
+                )
+            else:
+                loss_grad_mean = np.mean(
+                    np.array(jax.tree_flatten(
+                        jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                             )
+                )
+                bc_weights[k] = loss_grad_mean
+        for k in loss_grads:
+            if k == FLAGS.domain_loss:
+                continue
+            bc_weights[k] = (1 - FLAGS.annealing_alpha) * bc_weights_prev[k] + \
+                            FLAGS.annealing_alpha * (domain_loss_grad_max / bc_weights[k])
+        return bc_weights
 
     Field = pde.BaseField.partial(
         sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
@@ -198,10 +219,6 @@ def main(argv):
 
     @jax.jit
     def train_step(key, optimizer, bc_weights_prev):
-        # project gradients using PC grad
-        #if FLAGS.pcgrad:
-        #    batch_grad = perform_pcgrad(key, optimizer.target, loss_aux)
-        # balancing weights between boundary loss and domain loss
 
         if FLAGS.optimizer == "adahessian":
             k1, k2 = jax.random.split(key)
