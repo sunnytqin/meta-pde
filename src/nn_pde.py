@@ -166,7 +166,7 @@ def main(argv):
                 if FLAGS.annealing_l2:
                     domain_loss_grad_max = np.sum(
                         np.array(jax.tree_flatten(
-                        jax.tree_util.tree_map(lambda x: np.sum(x), loss_grad))[0]
+                        jax.tree_util.tree_map(lambda x: np.sum(x**2), loss_grad))[0]
                         )
                     )
                 else:
