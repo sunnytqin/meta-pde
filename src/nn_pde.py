@@ -98,19 +98,22 @@ def main(argv):
             loss_grads[k] = loss_grad
 
         # perform PC grad
-        if FLAGS.pcgrad and bc_weights_prev is not None:
+        if FLAGS.pcgrad:
             # place holder for new total loss gradient
-            total_grad_new = [np.zeros_like(x)
-                              for x in jax.tree_flatten(loss_grad)[0]]
-            _, loss_grads = perform_pcgrad(loss_grads, total_grad_new)
+            #total_grad_new = [np.zeros_like(x)
+            #                  for x in jax.tree_flatten(loss_grad)[0]]
+            # pdb.set_trace()
+            _, loss_grads = perform_pcgrad(loss_grads)
 
         # perform weight annealing
-        bc_weights = defaultdict(lambda: 1.0)
-        if FLAGS.annealing and bc_weights_prev is not None:
+        if FLAGS.annealing:
             bc_weights = perform_annealing(loss_grads, bc_weights_prev)
+            loss = np.sum(np.array([bc_weights[k] * v for k, v in loss_aux.items()]))
+        else:
+            bc_weights = None
+            loss = np.sum(np.array([v for v in loss_aux.values()]))
 
         # recompute loss
-        loss = np.sum(np.array([bc_weights[k] * v for k, v in loss_aux.items()]))
 
         return loss, (loss_aux, bc_weights)
 
@@ -132,35 +135,47 @@ def main(argv):
 
 
     @jax.jit
-    def perform_pcgrad(loss_grads, total_grad_new):
+    def perform_pcgrad(loss_grads):
         # define projection function
         project = partial(pcgrad.project_grads, FLAGS.pcgrad_norm)
 
+        _, treedef = jax.tree_flatten(list(loss_grads.values())[0])
         # for new individual loss gradient
         loss_grads_new = {}
 
+        loss_grads_flat = {k: np.concatenate([arr.flatten() for arr in jax.tree_flatten(v)[0]])
+            for k, v in loss_grads.items()}
+
+        total_grad_new = 0.
+
+        def reform(flat_arr):
+            fins = np.cumsum(np.array(dummy_sizes))
+            starts = fins - np.array(dummy_sizes)
+            out_list = []
+            for i in range(len(dummy_shapes)):
+                out_list.append(np.reshape(flat_arr[starts[i]:fins[i]],
+                                           dummy_shapes[i]))
+            return jax.tree_unflatten(treedef, out_list)
+
         # perform PC grad for each loss type
         for k in loss_grads:
-            grad = loss_grads[k]
-            other_grads = {k1: v1 for k1, v1 in loss_grads.items() if k1 != k}
-            loss_grad_new = jax.tree_multimap(
-                project, grad, *other_grads.values()
-            )
+            grad = loss_grads_flat[k]
+            other_grads = {k1: v1 for k1, v1 in loss_grads_flat.items() if k1 != k}
+            loss_grad_new = project(grad, *other_grads.values())
             # update the new projected individual loss function
-            loss_grads_new[k] = loss_grad_new
-            loss_grad_new_flat, treedef = jax.tree_flatten(loss_grad_new)
+            loss_grads_new[k] = reform(loss_grad_new)
+
             # update gradient for the entire loss function
-            total_grad_new = [x + y for x, y in zip(loss_grad_new_flat, total_grad_new)]
+            total_grad_new = loss_grad_new + total_grad_new
 
 
-        total_grad_new = jax.tree_unflatten(
-            treedef, total_grad_new
-        )
+        total_grad_new = reform(total_grad_new)
 
         return total_grad_new, loss_grads_new
 
     @jax.jit
     def perform_annealing(loss_grads, bc_weights_prev):
+        bc_weights = {FLAGS.domain_loss: 1.}
         for k, loss_grad in loss_grads.items():
             if k == FLAGS.domain_loss:
                 if FLAGS.annealing_l2:
@@ -210,7 +225,53 @@ def main(argv):
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
-    bc_weights = defaultdict(lambda: 1.0)
+    dummy_flat_grad, dummy_treedef = jax.tree_flatten(optimizer.target)
+    dummy_shapes = tuple(x.shape for x in dummy_flat_grad)
+    dummy_sizes = tuple(x.size for x in dummy_flat_grad)
+    fins = np.cumsum(np.array(dummy_sizes))
+    starts = fins - np.array(dummy_sizes)
+
+    fins = tuple(fins.tolist())
+    starts = tuple(starts.tolist())
+
+    @jax.jit
+    def reform(flat_arr):
+        out_list = []
+        for i in range(len(dummy_shapes)):
+            out_list.append(np.reshape(flat_arr[starts[i]:fins[i]],
+                                       dummy_shapes[i]))
+        return jax.tree_unflatten(dummy_treedef, out_list)
+
+    @jax.jit
+    def perform_pcgrad(loss_grads):
+        # define projection function
+        project = partial(pcgrad.project_grads, FLAGS.pcgrad_norm)
+
+        loss_grads_flat = {k: np.concatenate([arr.flatten() for arr in jax.tree_flatten(v)[0]])
+            for k, v in loss_grads.items()}
+        # for new individual loss gradient
+        loss_grads_new = {}
+
+        total_grad_new = 0.
+
+        # perform PC grad for each loss type
+        for k in loss_grads_flat:
+            grad = loss_grads_flat[k]
+            other_grads = {k1: v1 for k1, v1 in loss_grads_flat.items() if k1 != k}
+            loss_grad_new = project(grad, *other_grads.values())
+            # update the new projected individual loss function
+            loss_grads_new[k] = reform(loss_grad_new)
+
+            # update gradient for the entire loss function
+            total_grad_new = loss_grad_new + total_grad_new
+
+
+        total_grad_new = reform(total_grad_new)
+
+        return total_grad_new, loss_grads_new
+
+
+    bc_weights = None
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -236,7 +297,8 @@ def main(argv):
 
         if FLAGS.optimizer == "adahessian":
             k1, k2 = jax.random.split(key)
-            loss, (loss_aux, bc_weights) = batch_loss_fn(k1, optimizer.target, bc_weights_prev)
+            loss, (loss_aux, bc_weights) = batch_loss_fn(
+                k1, optimizer.target, bc_weights_prev)
             batch_grad, batch_hess = grad_and_hessian(
                 lambda model: batch_loss_fn(k1, model, bc_weights)[0],
                 (optimizer.target,),
