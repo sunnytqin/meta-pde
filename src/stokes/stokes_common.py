@@ -108,8 +108,7 @@ def loss_stress_fn(field_fn, points_in_domain, params):
     if FLAGS.stokes_nonlinear:
         deviatoric_stress_fn = lambda x: deviatoric_stress(
             x, get_u(field_fn), source_params)
-        grad_p = jax.grad(get_p(field_fn))
-
+        grad_p = jax.vmap(jax.grad(get_p(field_fn)))
         err = vmap_divergence_tensor(points_in_domain, deviatoric_stress_fn) - grad_p(
             points_in_domain
         )
