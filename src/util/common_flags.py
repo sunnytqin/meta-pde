@@ -67,7 +67,7 @@ flags.DEFINE_float("grad_clip", 1e14, "max grad for clipping")
 flags.DEFINE_float("siren_omega", 1.0, "siren_omega")
 flags.DEFINE_float("siren_omega0", 3.0, "siren_omega0")
 
-flags.DEFINE_integer("viz_every", int(1e5), "plot every N steps")
+flags.DEFINE_integer("viz_every", int(1e4), "plot every N steps")
 flags.DEFINE_integer("val_every", int(1e2), "validate every N steps")
 flags.DEFINE_integer("log_every", int(1e3), "tflog every N steps")
 flags.DEFINE_integer("measure_grad_norm_every", int(1e3), "")
