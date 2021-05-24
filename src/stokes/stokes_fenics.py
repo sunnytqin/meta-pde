@@ -125,7 +125,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
 
         F = (
             2 * mu_fn * fa.inner(strain_rate_fn(u), strain_rate_fn(v)) * fa.dx
-            - p * fa.div(v) * fa.dx
+            - FLAGS.pressure_factor * p * fa.div(v) * fa.dx
             + q * fa.div(u) * fa.dx
         )
         solver_parameters = {

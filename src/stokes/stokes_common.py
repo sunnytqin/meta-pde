@@ -109,7 +109,7 @@ def loss_stress_fn(field_fn, points_in_domain, params):
         deviatoric_stress_fn = lambda x: deviatoric_stress(
             x, get_u(field_fn), source_params)
         grad_p = jax.vmap(jax.grad(get_p(field_fn)))
-        err = vmap_divergence_tensor(points_in_domain, deviatoric_stress_fn) - grad_p(
+        err = vmap_divergence_tensor(points_in_domain, deviatoric_stress_fn) - FLAGS.pressure_factor * grad_p(
             points_in_domain
         )
 
