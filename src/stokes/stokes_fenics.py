@@ -160,8 +160,8 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     except Exception as e:
         print("Failed solve: ", e)
         print("Failed on params: ", params)
-        fa.plot(mesh)
-        plt.show()
+        solver_parameters['newton_solver']['relaxation_parameter'] *= 0.2
+        fa.solve(F==0, u_p, [bc_walls, bc_in, bc_out], solver_parameters=solver_parameters)
 
     return u_p
 
