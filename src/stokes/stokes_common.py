@@ -30,7 +30,7 @@ flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("pressure_factor", 10.0, "scale on random uniform bc")
-flags.DEFINE_integer("max_holes", 3, "scale on random uniform bc")
+flags.DEFINE_integer("max_holes", 2, "scale on random uniform bc")
 flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
 
 flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
@@ -224,7 +224,7 @@ def sample_params(key):
     for j in range(FLAGS.max_holes-1, 1, -1):
         dists = np.sqrt(np.sum((pore_x0y0[j].reshape(1, 2) - pore_x0y0[:j].reshape(-1, 2))**2,
                                axis=1, keepdims=True))
-        space_needed = pore_sizes[j].reshape(1, 1) * 1.5 + pore_sizes[:j].reshape(-1, 1) * 1.5
+        space_needed = FLAGS.max_hole_size * np.ones((1,1)) * 2.5
         is_invalid = (n_holes >= j) * (np.sum((dists - space_needed)<0) > 0)
         n_holes = (j-1) * is_invalid + n_holes * (1 - is_invalid)
 
