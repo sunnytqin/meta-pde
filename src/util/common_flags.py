@@ -16,7 +16,7 @@ flags.DEFINE_float("bc_weight", 100.0, "weight on bc loss")
 
 flags.DEFINE_float(
     "relaxation_parameter",
-    0.1,
+    0.2,
     "Newton solver relaxation parameter",
 )
 flags.DEFINE_integer(
@@ -61,7 +61,7 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_integer("outer_steps", int(1e8), "num outer steps")
 flags.DEFINE_integer("num_layers", 3, "num fcnn layers")
-flags.DEFINE_integer("layer_size", 256, "fcnn layer size")
+flags.DEFINE_integer("layer_size", 64, "fcnn layer size")
 flags.DEFINE_boolean("siren", True, "use siren")
 flags.DEFINE_float("grad_clip", 1e14, "max grad for clipping")
 flags.DEFINE_float("siren_omega", 1.0, "siren_omega")
