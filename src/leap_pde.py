@@ -154,7 +154,7 @@ def main(argv):
         meta_grad_norm = np.sqrt(
             jax.tree_util.tree_reduce(
                 lambda x, y: x + y,
-                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad[0]),
+                jax.tree_util.tree_map(lambda x: np.sum(x ** 2), meta_grad),
             )
         )
         meta_grad = jax.lax.cond(
