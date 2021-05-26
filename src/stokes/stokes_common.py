@@ -30,7 +30,7 @@ flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("pressure_factor", 10.0, "scale on random uniform bc")
-flags.DEFINE_integer("max_holes", 2, "scale on random uniform bc")
+flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
 flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
 
 flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
@@ -221,14 +221,25 @@ def sample_params(key):
                                    maxval=np.array([[xhigh, yhigh]]),
                                    shape=(FLAGS.max_holes, 2))
 
-    for j in range(FLAGS.max_holes-1, 1, -1):
-        dists = np.sqrt(np.sum((pore_x0y0[j].reshape(1, 2) - pore_x0y0[:j].reshape(-1, 2))**2,
+    validity = np.zeros(FLAGS.max_holes, dtype=np.int32)
+    validity = validity.at[0].add(1)
+
+    for j in range(1, FLAGS.max_holes):
+        dists = np.sqrt(np.sum((pore_x0y0[j].reshape(1, 2) - pore_x0y0.reshape(-1, 2))**2,
                                axis=1, keepdims=True))
-        space_needed = FLAGS.max_hole_size * np.ones((1,1)) * 2.5
-        is_invalid = (n_holes >= j) * (np.sum((dists - space_needed)<0) > 0)
-        n_holes = (j-1) * is_invalid + n_holes * (1 - is_invalid)
+        space_needed = (pore_sizes[j].reshape(1, 1) + pore_sizes.reshape(-1, 1) + FLAGS.max_hole_size) * validity.reshape(-1, 1)
+        is_valid = np.sum((dists - space_needed)<0) <= 0
+        validity = validity.at[j].add(1*is_valid)
+        # print(is_valid)
+
+    # pdb.set_trace()
+
+    permutation = np.argsort(validity)[::-1]
 
     per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
+    per_hole_params = per_hole_params[permutation]
+
+    n_holes = np.minimum(n_holes, np.sum(validity))
 
     return source_params, bc_params, per_hole_params, n_holes
 
