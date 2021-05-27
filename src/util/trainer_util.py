@@ -202,9 +202,13 @@ def vmap_validation_error(
 
 def get_optimizer(model_class, init_params):
     if FLAGS.optimizer == "adam":
-        optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta2=0.99).create(
+        optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta1=0.8, beta2=0.9).create(
             flax.nn.Model(model_class, init_params)
         )
+    elif FLAGS.optimizer == "rmsprop":
+            optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta1=0., beta2=0.8).create(
+                flax.nn.Model(model_class, init_params)
+            )
     elif FLAGS.optimizer == "ranger":
         optimizer = flaxOptimizers.Ranger(
             learning_rate=FLAGS.outer_lr, beta2=0.99, use_gc=False

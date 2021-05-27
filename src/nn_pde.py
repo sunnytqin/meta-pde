@@ -344,7 +344,7 @@ def main(argv):
                 _k1, _k2 = jax.random.split(
                     jax.random.split(subkey, FLAGS.bsize)[0], 2
                 )
-                _params = pde.sample_params(_k1)
+                _params = jax_tools.tree_unstack(gt_params)[0]
                 _points = pde.sample_points(_k2, FLAGS.outer_points, _params)
                 plt.figure()
                 for _pointsi in _points:
@@ -385,6 +385,36 @@ def main(argv):
                     tflogger.log_plots(
                         "Outputs dim {}".format(dim), [plt.gcf()], step
                     )
+                _outputs_on_coords = optimizer.target(coords[0])
+                for dim in range(_vals.shape[1]):
+                    plt.figure()
+                    clrs = plt.scatter(
+                        coords[0][:, 0], coords[0][:, 1], c=_outputs_on_coords[:, dim]
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "NN_on_coords dim {}".format(dim), [plt.gcf()], step
+                    )
+
+                    plt.figure()
+                    clrs = plt.scatter(
+                        coords[0][:, 0], coords[0][:, 1], c=fenics_vals[0][:, dim]
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "Fenics_on_coords dim {}".format(dim), [plt.gcf()], step
+                    )
+
+                    to_plot = fenics_vals[0][:, dim] - _outputs_on_coords[:, dim]
+                    plt.figure()
+                    clrs = plt.scatter(
+                        coords[0][:, 0], coords[0][:, 1], c=to_plot
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
+                    )
+
 
         if step % FLAGS.val_every == 0:
             with Timer() as deploy_timer:
@@ -448,6 +478,8 @@ def main(argv):
 
                     for k, v in jax_tools.dict_flatten(optimizer.target.params):
                         tflogger.log_histogram("Param: " + k, v.flatten(), step)
+                        if 'scale' in k:
+                            print("Scale params: {}: {}".format(k, v))
 
             log("time for logging {}".format(time.time() - time_last_log))
             time_last_log = time.time()

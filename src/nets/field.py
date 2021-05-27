@@ -11,6 +11,16 @@ from functools import partial
 import pdb
 
 
+import absl
+from absl import app
+from absl import flags
+
+FLAGS = flags.FLAGS
+
+
+flags.DEFINE_float('io_scale_lr_factor', 1e1, 'scale io lr by this factor')
+
+
 def siren_init(omega):
     def init_fn(key, shape, dtype=np.float32, omega=omega):
         fan_in = shape[0]
@@ -128,7 +138,14 @@ def dewhiten(y, mean, std):
     return y
 
 
+def constant_init(val):
+    def initializer(*args, **kwargs):
+        return val * flax.nn.initializers.ones(*args, **kwargs)
+    return initializer
+
+
 def nf_apply(
+    self,
     out_dim,
     x,
     sizes,
@@ -142,6 +159,12 @@ def nf_apply(
     omega=30.0,
     omega0=30.0,
 ):
+    log_in_scale = self.param('log_input_scale', (1, x.shape[-1],),
+                               constant_init(np.log(1./FLAGS.io_scale_lr_factor)))
+    in_scale = np.exp(log_in_scale)
+
+    x = (x.reshape(-1, x.shape[-1]) * in_scale).reshape(x.shape)
+
     if nonlinearity == np.sin:
         kernel_init = siren_init(omega)
         first_init = first_layer_siren_init(omega, omega0)
@@ -162,7 +185,13 @@ def nf_apply(
             x = nonlinearity(a)
     out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init,
                         bias_init=flax.nn.initializers.zeros)
-    # out = flax.nn.Dense(out, out_dim, bias_init=flax.nn.initializers.zeros)
+
+    log_out_scale = self.param('log_output_scale', (1, out_dim,),
+                               constant_init(np.log(1./FLAGS.io_scale_lr_factor)))
+    out_scale = np.exp(log_out_scale)
+
+    out = (out.reshape(-1, out_dim) * out_scale).reshape(out.shape)
+
     return out  # dewhiten(out, mean_y, std_y)
 
 
@@ -170,7 +199,7 @@ class NeuralField2d(nn.Module):
     def apply(
         self, x, *args, **kwargs,
     ):
-        return nf_apply(x.shape[-1], x, *args, **kwargs,)
+        return nf_apply(self, x.shape[-1], x, *args, **kwargs,)
 
 
 NeuralField = NeuralField2d
@@ -180,7 +209,7 @@ class NeuralField1d(nn.Module):
     def apply(
         self, *args, **kwargs,
     ):
-        return nf_apply(1, *args, **kwargs,).sum(axis=-1)
+        return nf_apply(self, 1, *args, **kwargs,).sum(axis=-1)
 
 
 def make_nf_ndim(n_dims):
@@ -188,7 +217,7 @@ def make_nf_ndim(n_dims):
         def apply(
             self, *args, **kwargs,
         ):
-            return nf_apply(n_dims, *args, **kwargs,)
+            return nf_apply(self, n_dims, *args, **kwargs,)
 
     return HigherDimNeuralField
 
