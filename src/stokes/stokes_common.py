@@ -193,6 +193,14 @@ def sample_params(key):
         k2, minval=-1.0, maxval=1.0, shape=(1,)
     )
 
+    if not FLAGS.max_holes > 0:
+        n_holes = 0
+        pore_x0y0 = np.zeros((1, 2))
+        pore_shapes = np.zeros((1, 2))
+        pore_sizes = np.zeros((1, 1))
+        per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
+        return source_params, bc_params, per_hole_params, n_holes
+
     n_holes = jax.random.randint(
         k3, shape=(1,), minval=np.array([1]),
         maxval=np.array([FLAGS.max_holes + 1])
@@ -265,7 +273,10 @@ def sample_points(key, n, params):
     points_on_inlet = sample_points_on_inlet(k1, n_on_inlet, params)
     points_on_outlet = sample_points_on_outlet(k2, n_on_outlet, params)
     points_on_walls = sample_points_on_walls(k3, n_on_walls, params)
-    points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
+    if FLAGS.max_holes > 0:
+        points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
+    else:
+        points_on_holes = points_on_walls
     points_in_domain = sample_points_in_domain(k5, n, params)
     return (
         points_on_inlet,
