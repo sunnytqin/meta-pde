@@ -67,6 +67,9 @@ class Logger(object):
         # Convert to a numpy array
         values = np.array(values)
 
+        if values.size < bins:
+            bins = values.size
+
         # Create and write Summary
         with self.writer.as_default():
             tf.summary.histogram(tag, values, step=step, buckets=bins)

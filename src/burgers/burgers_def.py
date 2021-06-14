@@ -5,20 +5,16 @@ by importing any other pde_def"""
 
 from ..nets.field import make_nf_ndim, DivFreeVelocityPressureField
 
-from .stokes_common import (
+from .burgers_common import (
     sample_params,
     sample_points,
     loss_fn,
     plot_solution,
     sample_points_in_domain,
-    get_p,
-    get_u,
-    SecondOrderTaylorLookup,
 )
 
-from .stokes_fenics import solve_fenics
+from .burgers_fenics import solve_fenics
 
-dim = 3
+dim = 2
 
-BaseField = DivFreeVelocityPressureField
-# BaseField = make_nf_ndim(3)
+BaseField = make_nf_ndim(2)

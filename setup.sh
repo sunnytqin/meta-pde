@@ -11,7 +11,7 @@ conda install -c conda-forge tensorflow
 conda install cudatoolkit==11.1
 conda install cudnn==8
 pip install --upgrade pip
-pip install --upgrade jax jaxlib==0.1.65+cuda112 -f https://storage.googleapis.com/jax-releases/jax_releases.html
+pip install --upgrade jax jaxlib==0.1.65+cuda111 -f https://storage.googleapis.com/jax-releases/jax_releases.html
 pip install flax
 pip install git+https://github.com/nestordemeure/flaxOptimizers.git
 pip install git+https://github.com/nestordemeure/AdaHessianJax.git

@@ -19,7 +19,7 @@ from ..util import common_flags
 
 FLAGS = flags.FLAGS
 
-from .stokes_common import (
+from .burgers_common import (
     plot_solution,
     loss_fn,
     fenics_to_jax,
@@ -51,7 +51,7 @@ def make_domain(c1, c2, n_points, x0, y0, size):
         pdb.set_trace()
 
 
-def solve_fenics(params, boundary_points=32, resolution=32):
+def solve_fenics(params, boundary_points=24, resolution=16):
     print("solving with params ", params)
     print("resolution ", resolution)
     domain = mshr.Rectangle(
@@ -83,20 +83,26 @@ def solve_fenics(params, boundary_points=32, resolution=32):
             or (not (fa.near(x[0], FLAGS.xmin) or fa.near(x[0], FLAGS.xmax)))
         )
 
-    V_h = fa.VectorElement("CG", mesh.ufl_cell(), 2)
-    Q_h = fa.FiniteElement("CG", mesh.ufl_cell(), 1)
-    W = fa.FunctionSpace(mesh, V_h * Q_h)
-    V, Q = W.split()
-    u_p = fa.Function(W)
-    u, p = fa.split(u_p)
-    v_q = fa.TestFunction(W)
-    v, q = fa.split(v_q)
-    du_p = fa.TrialFunction(W)
+    V = fa.VectorFunctionSpace(mesh, "P", 3)
+
+    u = fa.Function(V)
+    v = fa.TestFunction(V)
+    du = fa.TrialFunction(V)
 
     # Define function for setting Dirichlet values
     lhs_expr = fa.Expression(
-        ("A*sin(pi*(x[1]-ymin)/(ymax-ymin))", 0.0),
-        A=float(bc_params[0]),
+        ("A0*sin(pi*(x[1]-ymin)/(ymax-ymin))", "A1*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
+        A0=float(bc_params[0,0]),
+        A1=float(bc_params[0,1]),
+        ymax=FLAGS.ymax,
+        ymin=FLAGS.ymin,
+        element=V.ufl_element(),
+    )
+
+    rhs_expr = fa.Expression(
+        ("A0*sin(pi*(x[1]-ymin)/(ymax-ymin))","A1*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
+        A0=float(bc_params[1,0]),
+        A1=float(bc_params[1,1]),
         ymax=FLAGS.ymax,
         ymin=FLAGS.ymin,
         element=V.ufl_element(),
@@ -106,54 +112,48 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     # plt.show()
     # pdb.set_trace()
     bc_in = fa.DirichletBC(V, lhs_expr, inlet)
-    bc_out = fa.DirichletBC(Q, fa.Constant((0.0)), outlet)
+    bc_out = fa.DirichletBC(V, rhs_expr, outlet)
     bc_walls = fa.DirichletBC(V, fa.Constant((0.0, 0.0)), walls)
     # bc_pressure = fa.DirichletBC(Q, fa.Constant((1.)), inlet)
 
     dx = fa.Measure("dx")
 
     # Define variational problem
-    u_p.vector().set_local(np.random.randn(len(u_p.vector())) * 1e-6)
+    u.vector().set_local(np.random.randn(len(u.vector())) * 1e-6)
 
-    if FLAGS.stokes_nonlinear:
-        def strain_rate_fn(field):
-            return (fa.grad(field) + fa.grad(field).T) / 2
 
-        effective_sr = fa.sqrt(0.5 * fa.inner(strain_rate_fn(u), strain_rate_fn(u)))
+    #     [ux   uy  ] [u   = [u ux + vuy
+    #      vx   vy     v]     u vx + v vy]
 
-        mu_fn = float(source_params[0]) * effective_sr ** float(-source_params[1])
 
-        F = (
-            2 * mu_fn * fa.inner(strain_rate_fn(u), strain_rate_fn(v)) * fa.dx
-            - FLAGS.pressure_factor * p * fa.div(v) * fa.dx
-            + q * fa.div(u) * fa.dx
-        )
-        solver_parameters = {
-            "newton_solver": {
-                "maximum_iterations": FLAGS.max_newton_steps,
-                "relaxation_parameter": FLAGS.relaxation_parameter,
-                "linear_solver": "mumps",
-            }}
+    # (u ux - uxx)  +  (v uy - uyy)
 
-    else:
-        F = (
-            fa.inner(fa.grad(u), fa.grad(v)) * fa.dx
-            - FLAGS.pressure_factor
-            * p
-            * fa.div(v)
-            * fa.dx  # Pressure varies on 100x scale of velocity
-            + q * fa.div(u) * fa.dx
-        )
-        solver_parameters = {
-            "newton_solver": {
-                "maximum_iterations": FLAGS.max_newton_steps,
-                "linear_solver": "mumps",
-            }}
+    lhs_term = fa.inner(fa.grad(u) * u, v)
+
+    # [ u0xx + u0yy
+    #   u1xx + u1yy ]
+
+    #  u0xx * v0 -> - u0x * v0x
+    #  u0yy * v0 -> u0y * v0y
+
+    rhs_term = fa.inner(u.dx(0), v.dx(0)) + fa.inner(u.dx(1), v.dx(1))
+
+    # rhs_term = fa.inner((u.dx(0).dx(0) + u.dx(1).dx(1)), v)
+
+    F = (
+        lhs_term * fa.dx - rhs_term * fa.dx
+    )
+    solver_parameters = {
+        "newton_solver": {
+            "maximum_iterations": FLAGS.max_newton_steps,
+            "relaxation_parameter": FLAGS.relaxation_parameter,
+            "linear_solver": "mumps",
+        }}
 
     try:
         fa.solve(
             F == 0,
-            u_p,
+            u,
             [bc_walls, bc_in, bc_out],
             solver_parameters=solver_parameters,
         )
@@ -161,9 +161,9 @@ def solve_fenics(params, boundary_points=32, resolution=32):
         print("Failed solve: ", e)
         print("Failed on params: ", params)
         solver_parameters['newton_solver']['relaxation_parameter'] *= 0.2
-        fa.solve(F==0, u_p, [bc_walls, bc_in, bc_out], solver_parameters=solver_parameters)
+        fa.solve(F==0, u, [bc_walls, bc_in, bc_out], solver_parameters=solver_parameters)
 
-    return u_p
+    return u
 
 
 def is_defined(xy, u):
@@ -180,115 +180,36 @@ def main(argv):
 
     print("params: ", params)
 
-    u_p = solve_fenics(params)
+    u = solve_fenics(params, resolution=FLAGS.ground_truth_resolution,
+                     boundary_points=int(FLAGS.boundary_resolution_factor*FLAGS.ground_truth_resolution))
 
-    x = np.array(u_p.function_space().tabulate_dof_coordinates()[:100])
+    x = np.array(u.function_space().tabulate_dof_coordinates()[:100])
 
     points = sample_points(jax.random.PRNGKey(FLAGS.seed + 1), 128, params)
 
     normalizer = fa.assemble(
         fa.project(
-            fa.Constant((1.0)), fa.FunctionSpace(u_p.function_space().mesh(), "P", 2)
+            fa.Constant((1.0)), fa.FunctionSpace(u.function_space().mesh(), "P", 2)
         )
         * fa.dx
     )
-    for i in range(3):
+    for i in range(2):
         solution_dim_i = fa.inner(
-            u_p, fa.Constant((0.0 + i == 0, 0.0 + i == 1, 0.0 + i == 2))
+            u, fa.Constant((0.0 + i == 0, 0.0 + i == 1))
         )
         print(
             "norm in dim {}: ".format(i),
             fa.assemble(fa.inner(solution_dim_i, solution_dim_i) * fa.dx) / normalizer,
         )
 
-    u, p = u_p.split()
-    plt.figure(figsize=(9, 3))
-    clrs = fa.plot(p)
-    plt.colorbar(clrs)
+    plt.figure(figsize=(5, 5))
+    plot_solution(u, params)
     plt.show()
 
-    plt.figure(figsize=(9, 3))
-    plot_solution(u_p, params)
-    plt.show()
+    plt.figure(figsize=(5, 5))
+    fa.plot(u.function_space().mesh())
 
-    u, p = u_p.split()
-    # plot solution
-    X, Y = np.meshgrid(
-        np.linspace(FLAGS.xmin, FLAGS.xmax, 300),
-        np.linspace(FLAGS.ymin, FLAGS.ymax, 100),
-    )
-    Xflat, Yflat = X.reshape(-1), Y.reshape(-1)
-
-    # X, Y = X[valid], Y[valid]
-    valid = [is_defined([x, y], u_p) for x, y in zip(Xflat, Yflat)]
-
-    UV = [
-        u_p(x, y)[:2] if is_defined([x, y], u_p) else np.array([0.0, 0.0])
-        for x, y in zip(Xflat, Yflat)
-    ]
-
-    U = np.array([uv[0] for uv in UV]).reshape(X.shape)
-    V = np.array([uv[1] for uv in UV]).reshape(Y.shape)
-
-    X_, Y_ = np.meshgrid(
-        np.linspace(FLAGS.xmin, FLAGS.xmax, 60), np.linspace(FLAGS.ymin, FLAGS.ymax, 40)
-    )
-    Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
-
-    # X, Y = X[valid], Y[valid]
-    valid_ = [is_defined([x, y], u_p) for x, y in zip(Xflat_, Yflat_)]
-    Xflat_, Yflat_ = Xflat_[valid_], Yflat_[valid_]
-    UV_ = [u_p(x, y)[:2] for x, y in zip(Xflat_, Yflat_)]
-
-    U_ = np.array([uv[0] for uv in UV_])
-    V_ = np.array([uv[1] for uv in UV_])
-
-    plt.figure(figsize=(9, 3))
-    fa.plot(p)
-    plt.show()
-
-    plt.figure(figsize=(9, 3))
-    parr = np.array([p([x, y]) for x, y in zip(Xflat_, Yflat_)])
-    fa.plot(
-        p,
-        mode="color",
-        shading="gouraud",
-        edgecolors="k",
-        linewidth=0.0,
-        cmap="BuPu",
-        vmin=parr.min() - 0.5 * parr.max() - 0.5,
-        vmax=2 * parr.max() - parr.min() + 0.5,
-    )
-
-    speed = np.linalg.norm(np.stack([U, V], axis=2), axis=2)
-
-    speed_ = np.linalg.norm(np.stack([U_, V_], axis=1), axis=1)
-
-    seed_points = np.stack(
-        [FLAGS.xmin * np.ones(40), np.linspace(FLAGS.ymin + 0.1, FLAGS.ymax - 0.1, 40)],
-        axis=1,
-    )
-
-    plt.quiver(Xflat_, Yflat_, U_, V_, speed_ / speed_.max(), alpha=0.7)
-    plt.streamplot(
-        X,
-        Y,
-        U,
-        V,
-        color=speed / speed.max(),
-        start_points=seed_points,
-        density=10,
-        linewidth=0.2,
-        arrowsize=0.0,
-    )  # , np.sqrt(U**2+V**2))
-    # plt.scatter(X_[in_hole], Y_[in_hole], c='gray', s=0.1)
-
-    # plt.figure(figsize=(9, 3))
-
-    plt.figure(figsize=(9, 3))
-    fa.plot(u_p.function_space().mesh())
-
-    plt.figure(figsize=(9, 3))
+    plt.figure(figsize=(5, 5))
     (
         points_inlet,
         points_outlet,

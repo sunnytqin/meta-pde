@@ -76,43 +76,7 @@ def main(argv):
         points = pde.sample_points(k2, FLAGS.outer_points, params)
         return loss_fn(model, fa_p, points, params)
 
-    @jax.jit
-    def batch_loss_fn(key, model, bc_weights_prev):
-        vmap_task_loss_fn = jax.vmap(task_loss_fn, (0, None))
 
-        keys = jax.random.split(key, FLAGS.bsize)
-        _, loss_dict = vmap_task_loss_fn(keys, model)
-
-        loss_aux = {}  # store original loss by loss type
-        loss_grads = {}  # store original loss gradient by loss type
-
-        # get original gradients
-        for k in loss_dict:
-            loss_aux[k] = np.sum(loss_dict[k])
-            # do nothing if not annealing and not pcgrad-ing
-            if ((not FLAGS.annealing and not FLAGS.pcgrad) \
-                    or bc_weights_prev is None):
-                continue
-            single_loss_fn = lambda model: np.sum(vmap_task_loss_fn(keys, model)[1][k])
-            _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
-            loss_grads[k] = loss_grad
-
-        # perform PC grad
-        if FLAGS.pcgrad and bc_weights_prev is not None:
-            # place holder for new total loss gradient
-            total_grad_new = [np.zeros_like(x)
-                              for x in jax.tree_flatten(loss_grad)[0]]
-            _, loss_grads = perform_pcgrad(loss_grads, total_grad_new)
-
-        # perform weight annealing
-        bc_weights = defaultdict(lambda: 1.0)
-        if FLAGS.annealing and bc_weights_prev is not None:
-            bc_weights = perform_annealing(loss_grads, bc_weights_prev)
-
-        # recompute loss
-        loss = np.sum(np.array([bc_weights[k] * v for k, v in loss_aux.items()]))
-
-        return loss, (loss_aux, bc_weights)
 
     @partial(jax.jit, static_argnums=[2])
     def get_grad_norms(key, model, fa_p):
@@ -132,48 +96,35 @@ def main(argv):
 
 
     @jax.jit
-    def perform_pcgrad(loss_grads, total_grad_new):
-        # define projection function
-        project = partial(pcgrad.project_grads, FLAGS.pcgrad_norm)
-
-        # for new individual loss gradient
-        loss_grads_new = {}
-
-        # perform PC grad for each loss type
-        for k in loss_grads:
-            grad = loss_grads[k]
-            other_grads = {k1: v1 for k1, v1 in loss_grads.items() if k1 != k}
-            loss_grad_new = jax.tree_multimap(
-                project, grad, *other_grads.values()
-            )
-            # update the new projected individual loss function
-            loss_grads_new[k] = loss_grad_new
-            loss_grad_new_flat, treedef = jax.tree_flatten(loss_grad_new)
-            # update gradient for the entire loss function
-            total_grad_new = [x + y for x, y in zip(loss_grad_new_flat, total_grad_new)]
-
-
-        total_grad_new = jax.tree_unflatten(
-            treedef, total_grad_new
-        )
-
-        return total_grad_new, loss_grads_new
-
-    @jax.jit
     def perform_annealing(loss_grads, bc_weights_prev):
+        bc_weights = {FLAGS.domain_loss: 1.}
         for k, loss_grad in loss_grads.items():
             if k == FLAGS.domain_loss:
-                domain_loss_grad_max = np.max(
-                    np.array(jax.tree_flatten(
+                if FLAGS.annealing_l2:
+                    domain_loss_grad_max = np.sum(
+                        np.array(jax.tree_flatten(
+                        jax.tree_util.tree_map(lambda x: np.sum(x**2), loss_grad))[0]
+                        )
+                    )
+                else:
+                    domain_loss_grad_max = np.max(
+                        np.array(jax.tree_flatten(
                         jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
-                             )
-                )
+                        )
+                    )
             else:
-                loss_grad_mean = np.mean(
-                    np.array(jax.tree_flatten(
-                        jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
-                             )
-                )
+                if FLAGS.annealing_l2:
+                    loss_grad_mean = np.sum(
+                        np.array(jax.tree_flatten(
+                            jax.tree_util.tree_map(lambda x: np.sum(x**2), loss_grad))[0]
+                        )
+                    )
+                else:
+                    loss_grad_mean = np.sum(
+                        np.array(jax.tree_flatten(
+                            jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
+                        )
+                    )
                 bc_weights[k] = loss_grad_mean
         for k in loss_grads:
             if k == FLAGS.domain_loss:
@@ -196,9 +147,6 @@ def main(argv):
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
-<<<<<<< Updated upstream
-    bc_weights = defaultdict(lambda: 1.0)
-=======
     dummy_flat_grad, dummy_treedef = jax.tree_flatten(optimizer.target)
     dummy_shapes = tuple(x.shape for x in dummy_flat_grad)
     dummy_sizes = tuple(x.size for x in dummy_flat_grad)
@@ -284,7 +232,6 @@ def main(argv):
         return loss, (loss_aux, bc_weights)
 
     bc_weights = None
->>>>>>> Stashed changes
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -324,12 +271,8 @@ def main(argv):
 
         if FLAGS.optimizer == "adahessian":
             k1, k2 = jax.random.split(key)
-<<<<<<< Updated upstream
-            loss, (loss_aux, bc_weights) = batch_loss_fn(k1, optimizer.target, bc_weights_prev)
-=======
             loss, (loss_aux, bc_weights) = batch_loss_fn(
                 k1, optimizer.target, fa_p, bc_weights_prev)
->>>>>>> Stashed changes
             batch_grad, batch_hess = grad_and_hessian(
                 lambda model: batch_loss_fn(k1, model, fa_p, bc_weights)[0],
                 (optimizer.target,),
@@ -429,7 +372,7 @@ def main(argv):
                 _k1, _k2 = jax.random.split(
                     jax.random.split(subkey, FLAGS.bsize)[0], 2
                 )
-                _params = pde.sample_params(_k1)
+                _params = jax_tools.tree_unstack(gt_params)[0]
                 _points = pde.sample_points(_k2, FLAGS.outer_points, _params)
                 plt.figure()
                 for _pointsi in _points:
@@ -471,6 +414,36 @@ def main(argv):
                     tflogger.log_plots(
                         "Outputs dim {}".format(dim), [plt.gcf()], step
                     )
+                _outputs_on_coords = optimizer.target(coords[0])
+                for dim in range(_vals.shape[1]):
+                    plt.figure()
+                    clrs = plt.scatter(
+                        coords[0][:, 0], coords[0][:, 1], c=_outputs_on_coords[:, dim]
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "NN_on_coords dim {}".format(dim), [plt.gcf()], step
+                    )
+
+                    plt.figure()
+                    clrs = plt.scatter(
+                        coords[0][:, 0], coords[0][:, 1], c=fenics_vals[0][:, dim]
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "Fenics_on_coords dim {}".format(dim), [plt.gcf()], step
+                    )
+
+                    to_plot = fenics_vals[0][:, dim] - _outputs_on_coords[:, dim]
+                    plt.figure()
+                    clrs = plt.scatter(
+                        coords[0][:, 0], coords[0][:, 1], c=to_plot
+                    )
+                    plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
+                    )
+
 
         if step % FLAGS.val_every == 0:
             with Timer() as deploy_timer:
@@ -534,6 +507,8 @@ def main(argv):
 
                     for k, v in jax_tools.dict_flatten(optimizer.target.params):
                         tflogger.log_histogram("Param: " + k, v.flatten(), step)
+                        if 'scale' in k:
+                            print("Scale params: {}: {}".format(k, v))
 
             log("time for logging {}".format(time.time() - time_last_log))
             time_last_log = time.time()

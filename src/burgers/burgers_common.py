@@ -6,6 +6,9 @@ from functools import partial
 import argparse
 from collections import namedtuple
 
+from jax.config import config
+# config.update('jax_disable_jit', True)
+
 import matplotlib.pyplot as plt
 
 import fenics as fa
@@ -22,108 +25,31 @@ from absl import app
 from absl import flags
 from ..util import common_flags
 
+
+flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
+
+
 FLAGS = flags.FLAGS
 
 
-flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
-flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
-flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
-flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-flags.DEFINE_float("pressure_factor", 10.0, "scale on random uniform bc")
-flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
-flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
-
-flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
-
-
-def get_u(field_fn):
-    def u(x):
-        u_p = field_fn(x)
-        if FLAGS.pde == 'pressurefree_stokes':
-            return u_p
-        else:
-            if len(u_p.shape) == 1:
-                return u_p[:-1]
-            elif len(u_p.shape) == 2:
-                return u_p[:, :-1]
-            else:
-                raise Exception("Invalid shaped field")
-
-    return u
-
-
-def get_p(field_fn):
-    def p(x):
-        u_p = field_fn(x)
-        if len(u_p.shape) == 1:
-            return u_p[-1]
-        elif len(u_p.shape) == 2:
-            return u_p[:, -1]
-        else:
-            raise Exception("Invalid shaped field")
-
-    return p
-
-
-def deviatoric_stress(x, field_fn, source_params):
-    """
-    Inputs:
-        x: [2]
-        field_fn: fn which takes x and returns the field
-
-    returns:
-        deviatoric stress tau
-    """
-    assert len(x.shape) == 1
-    print(x.shape)
-    dtype = x.dtype
-    jac = jax.jacfwd(lambda x: field_fn(x).squeeze())(x)
-
-    strain_rate = (jac + jac.transpose()) / 2  # Strain rate function
-    effective_sr = np.sqrt(
-        np.sum(0.5 * strain_rate ** 2)
-    )  # Effective strain rate function
-    mu_fn = source_params[0] * effective_sr ** (-source_params[1])
-
-    return 2 * mu_fn * strain_rate
-
-def loss_divu_fn(field_fn, points_in_domain, params):
-    # force div(u) = 0
-    source_params, bc_params, per_hole_params, n_holes = params
-    div_u = vmap_divergence(points_in_domain, get_u(field_fn),)
-
-    return div_u ** 2
-
-def loss_neumann_fn(field_fn, points_on_outlet, params):
-    u = get_u(field_fn)
-    dudx1 = lambda x: jax.jacfwd(u)(x.reshape(2))[:, 0]
-    dudx1_all = jax.vmap(dudx1)(points_on_outlet)
-    return np.mean(dudx1_all **2, axis=1)
-
-
-def loss_stress_fn(field_fn, fa_p, points_in_domain, params):
-    # force div(grad(u) - p * I) = 0
+def loss_domain_fn(field_fn, points_in_domain, params):
+    # u ux + v uy - Re(uxx + uyy) = 0
+    # u vx + v vy - Re(vxx + vyy) = 0
     source_params, bc_params, per_hole_params, n_holes = params
 
-    if FLAGS.stokes_nonlinear:
-        deviatoric_stress_fn = lambda x: deviatoric_stress(
-            x, get_u(field_fn), source_params)
-        grad_p = jax.vmap(jax.grad(get_p(field_fn)))
-        err = vmap_divergence_tensor(points_in_domain, deviatoric_stress_fn) - FLAGS.pressure_factor * grad_p(
-            points_in_domain
-        )
+    jac_fn = jax.jacfwd(field_fn)
 
-    else:
-        gradu_fn = jax.jacfwd(get_u(field_fn))
-        if FLAGS.pde == 'pressurefree_stokes':
-            gradu_plus_p_fn = lambda x: gradu_fn(x) - \
-                                        FLAGS.pressure_factor * fa_p(x) * np.eye(2)
-        else:
-            gradu_plus_p_fn = lambda x: gradu_fn(x) - \
-                                        FLAGS.pressure_factor * get_p(field_fn)(x) * np.eye(2)
-        err = vmap_divergence_tensor(points_in_domain, gradu_plus_p_fn)
+    def lhs_fn(x):
+        return np.matmul(jac_fn(x).reshape(2,2), field_fn(x).reshape(2, 1)).reshape(2)
 
-    return (1.0 / FLAGS.pressure_factor ** 2) * np.mean(err ** 2, axis=1)
+    def rhs_fn(x):
+        uxx = jax.jvp(lambda xi: jax.jvp(field_fn, (xi,), (np.array([1., 0.]),))[1],
+                (x,), (np.array([1., 0.]),))[1]
+        uyy = jax.jvp(lambda xi: jax.jvp(field_fn, (xi,), (np.array([0., 1.]),))[1],
+                        (x,), (np.array([0., 1.]),))[1]
+        return (1./ source_params[0]) * (uxx + uyy).reshape(2)
+
+    return (jax.vmap(lhs_fn)(points_in_domain) - jax.vmap(rhs_fn)(points_in_domain))**2
 
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):
@@ -131,21 +57,31 @@ def loss_inlet_fn(field_fn, points_on_inlet, params):
     sinusoidal_magnitude = np.sin(
         np.pi * (points_on_inlet[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin)
     ).reshape(-1, 1)
-    u = get_u(field_fn)
 
     return (
-        u(points_on_inlet)
-        - bc_params[0] * sinusoidal_magnitude * np.array([1.0, 0.0]).reshape(1, 2)
+        field_fn(points_on_inlet)
+        - bc_params[0].reshape(1, 2) * sinusoidal_magnitude
+    ) ** 2
+
+
+def loss_outlet_fn(field_fn, points_on_outlet, params):
+    source_params, bc_params, per_hole_params, n_holes = params
+    sinusoidal_magnitude = np.sin(
+        np.pi * (points_on_outlet[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin)
+    ).reshape(-1, 1)
+
+    return (
+        field_fn(points_on_outlet)
+        - bc_params[1].reshape(1, 2) * sinusoidal_magnitude
     ) ** 2
 
 
 def loss_noslip_fn(field_fn, points_noslip, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    u = get_u(field_fn)
-    return u(points_noslip) ** 2
+    return field_fn(points_noslip) ** 2
 
 
-def loss_fn(field_fn, fa_p, points, params):
+def loss_fn(field_fn, points, params):
     (
         points_on_inlet,
         points_on_outlet,
@@ -155,21 +91,14 @@ def loss_fn(field_fn, fa_p, points, params):
     ) = points
     points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
-    if FLAGS.pde == 'pressurefree_stokes':
-        p_outlet = fa_p(points_on_outlet)
-    else:
-        p_outlet = get_p(field_fn)(points_on_outlet)
-
     return (
         {
             "loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
             "loss_inlet": np.mean(loss_inlet_fn(field_fn, points_on_inlet, params)),
-            "loss_p_outlet": np.mean(p_outlet ** 2),
-            "loss_neumann_outlet": np.mean(loss_neumann_fn(field_fn, points_on_outlet, params))
+            "loss_outlet": np.mean(loss_outlet_fn(field_fn, points_on_outlet, params)),
         },
         {
-            "loss_stress": np.mean(loss_stress_fn(field_fn, fa_p, points_in_domain, params)),
-            "loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
+            "loss_domain": np.mean(loss_domain_fn(field_fn, points_in_domain, params)),
         },
     )
 
@@ -195,19 +124,11 @@ def sample_params(key):
     k7 = k7 * FLAGS.vary_geometry
 
 
-    source_params = jax.random.uniform(k1, shape=(2,), minval=1 / 4, maxval=3.0 / 4)
+    source_params = FLAGS.max_reynolds * jax.random.uniform(k1, shape=(1,), minval=0., maxval=1.)
 
     bc_params = FLAGS.bc_scale * jax.random.uniform(
-        k2, minval=-1.0, maxval=1.0, shape=(1,)
+        k2, minval=-1.0, maxval=1.0, shape=(2,2,)
     )
-
-    if not FLAGS.max_holes > 0:
-        n_holes = 0
-        pore_x0y0 = np.zeros((1, 2))
-        pore_shapes = np.zeros((1, 2))
-        pore_sizes = np.zeros((1, 1))
-        per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
-        return source_params, bc_params, per_hole_params, n_holes
 
     n_holes = jax.random.randint(
         k3, shape=(1,), minval=np.array([1]),
@@ -281,10 +202,7 @@ def sample_points(key, n, params):
     points_on_inlet = sample_points_on_inlet(k1, n_on_inlet, params)
     points_on_outlet = sample_points_on_outlet(k2, n_on_outlet, params)
     points_on_walls = sample_points_on_walls(k3, n_on_walls, params)
-    if FLAGS.max_holes > 0:
-        points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
-    else:
-        points_on_holes = points_on_walls
+    points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
     points_in_domain = sample_points_in_domain(k5, n, params)
     return (
         points_on_inlet,
@@ -530,9 +448,9 @@ def error_on_coords(fenics_fn, jax_fn, coords=None):
     return np.mean((fenics_vals - jax_vals) ** 2)
 
 
-def plot_solution(u_p, params):
+def plot_solution(u, params):
     _, _, per_hole_params, num_holes = params
-    u, p = fa.split(u_p)
+
     X, Y = npo.meshgrid(
         npo.linspace(FLAGS.xmin, FLAGS.xmax, 300),
         npo.linspace(FLAGS.ymin, FLAGS.ymax, 100),
@@ -540,10 +458,10 @@ def plot_solution(u_p, params):
     Xflat, Yflat = X.reshape(-1), Y.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
-    valid = [is_defined([x, y], u_p) for x, y in zip(Xflat, Yflat)]
+    valid = [is_defined([x, y], u) for x, y in zip(Xflat, Yflat)]
 
     UV = [
-        u_p(x, y)[:2] if is_defined([x, y], u_p) else npo.array([0.0, 0.0])
+        u(x, y) if is_defined([x, y], u) else npo.array([0.0, 0.0])
         for x, y in zip(Xflat, Yflat)
     ]
 
@@ -557,9 +475,9 @@ def plot_solution(u_p, params):
     Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
 
     # X, Y = X[valid], Y[valid]
-    valid_ = [is_defined([x, y], u_p) for x, y in zip(Xflat_, Yflat_)]
+    valid_ = [is_defined([x, y], u) for x, y in zip(Xflat_, Yflat_)]
     Xflat_, Yflat_ = Xflat_[valid_], Yflat_[valid_]
-    UV_ = [u_p(x, y)[:2] for x, y in zip(Xflat_, Yflat_)]
+    UV_ = [u(x, y) for x, y in zip(Xflat_, Yflat_)]
 
     U_ = npo.array([uv[0] for uv in UV_])
     V_ = npo.array([uv[1] for uv in UV_])
@@ -576,18 +494,15 @@ def plot_solution(u_p, params):
         axis=1,
     )
 
-    parr = npo.array([p([x, y]) for x, y in zip(Xflat_, Yflat_)])
+    intensity = fa.inner(u, u) + 0.1
+    fa.plot(intensity,
+            mode="color",
+            shading="gouraud",
+            edgecolors="k",
+            linewidth=0.0,
+            cmap="BuPu",
+        )
 
-    fa.plot(
-        p,
-        mode="color",
-        shading="gouraud",
-        edgecolors="k",
-        linewidth=0.0,
-        cmap="BuPu",
-        vmin=parr.min() - 0.5 * parr.max() - 0.5,
-        vmax=2 * parr.max() - parr.min() + 0.5,
-    )
     plt.quiver(Xflat_, Yflat_, U_, V_, speed_ / speed_.max(), alpha=0.7)
 
     plt.streamplot(

@@ -16,7 +16,7 @@ flags.DEFINE_float("bc_weight", 100.0, "weight on bc loss")
 
 flags.DEFINE_float(
     "relaxation_parameter",
-    0.1,
+    0.2,
     "Newton solver relaxation parameter",
 )
 flags.DEFINE_integer(
@@ -61,22 +61,23 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_integer("outer_steps", int(1e8), "num outer steps")
 flags.DEFINE_integer("num_layers", 3, "num fcnn layers")
-flags.DEFINE_integer("layer_size", 256, "fcnn layer size")
+flags.DEFINE_integer("layer_size", 64, "fcnn layer size")
 flags.DEFINE_boolean("siren", True, "use siren")
 flags.DEFINE_float("grad_clip", 1e14, "max grad for clipping")
 flags.DEFINE_float("siren_omega", 1.0, "siren_omega")
 flags.DEFINE_float("siren_omega0", 3.0, "siren_omega0")
 
-flags.DEFINE_integer("viz_every", int(1e5), "plot every N steps")
+flags.DEFINE_integer("viz_every", int(1e4), "plot every N steps")
 flags.DEFINE_integer("val_every", int(1e2), "validate every N steps")
 flags.DEFINE_integer("log_every", int(1e3), "tflog every N steps")
 flags.DEFINE_integer("measure_grad_norm_every", int(1e3), "")
 
 flags.DEFINE_string("optimizer", "ranger", "adam or ranger, currently no adahess")
 
-flags.DEFINE_boolean("annealing", True, "annealing bc losses")
+flags.DEFINE_boolean("annealing", False, "annealing bc losses")
+flags.DEFINE_boolean("annealing_l2", False, "anneal losses in l2 norm")
+
 flags.DEFINE_float("annealing_alpha", 0.9, "annealing smoothing param")
 
-flags.DEFINE_boolean("pcgrad", True, "perform PC grad")
+flags.DEFINE_boolean("pcgrad", False, "perform PC grad")
 flags.DEFINE_float("pcgrad_norm", 1.0, "PC grad multiplier")
-
