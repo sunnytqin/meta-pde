@@ -213,6 +213,27 @@ class DivFreeVelocityPressureField(nn.Module):
 
         return np.stack((vel_x, vel_y, pressure), axis=1).reshape((*x_shape[:-1], 3))
 
+class DivFreeVelocityField(nn.Module):
+    def apply(
+            self, x, *args, **kwargs,
+    ):
+        x_shape = x.shape
+        x = x.reshape(-1, 2)
+
+        base_field = NeuralField1d.shared(**kwargs)
+
+        def phi_fn(x_):
+            phi_p = base_field(x_)
+            return np.sum(phi_p)
+
+        gradphi = jax.grad(phi_fn, has_aux=False)(x)
+
+        vel_x = gradphi[:, 1]
+        vel_y = -gradphi[:, 0]
+
+        return np.stack((vel_x, vel_y), axis=1).reshape((*x_shape[:-1], 2))
+
+
 
 
 NeuralPotential = NeuralField1d

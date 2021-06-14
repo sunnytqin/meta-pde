@@ -119,8 +119,9 @@ def compare_plots_with_ground_truth(
 
         for j in range(inner_steps + 1):
             plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
+            model, fa_p = model
             final_model = get_final_model(
-                keys[i], model, params_list[i], j, meta_alg_def,
+                keys[i], model, fa_p, params_list[i], j, meta_alg_def,
             )
 
             coords = ground_truth.function_space().tabulate_dof_coordinates()
@@ -174,15 +175,17 @@ def prepare_logging(out_dir, expt_name):
     return path, log, tflogger
 
 
-@partial(jax.jit, static_argnums=4)
+@partial(jax.jit, static_argnums=[1, 5])
 def vmap_validation_error(
-    model, ground_truth_params, points, ground_truth_vals, make_coef_func,
+    model, fa_p, ground_truth_params, points, ground_truth_vals, make_coef_func,
 ):
     key = jax.random.PRNGKey(0)
     keys = jax.random.split(key, FLAGS.n_eval)
 
-    coefs = vmap(make_coef_func, (0, None, 0, 0))(
-        keys, model, ground_truth_params, points
+    make_coef_func_partial = jax.jit(partial(make_coef_func, model=model, fa_p=fa_p))
+
+    coefs = vmap(make_coef_func_partial, (0, 0, 0))(
+        keys, ground_truth_params, points
     )
     coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
     ground_truth_vals = ground_truth_vals.reshape(coefs.shape)

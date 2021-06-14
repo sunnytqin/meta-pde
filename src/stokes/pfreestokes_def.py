@@ -3,7 +3,7 @@
 Stuff exposed via importing this module should have the same names as stuff exposed
 by importing any other pde_def"""
 
-from ..nets.field import make_nf_ndim, DivFreeVelocityPressureField
+from ..nets.field import make_nf_ndim, DivFreeVelocityField
 
 from .stokes_common import (
     sample_params,
@@ -18,12 +18,7 @@ from .stokes_common import (
 
 from .stokes_fenics import solve_fenics
 
-dim = 3
+dim = 2
 
-<<<<<<< Updated upstream
-# BaseField = make_nf_ndim(3)
-BaseField = DivFreeVelocityPressureField
-=======
-BaseField = DivFreeVelocityPressureField
-#BaseField = make_nf_ndim(3)
->>>>>>> Stashed changes
+BaseField = DivFreeVelocityField
+#BaseField = make_nf_ndim(2)

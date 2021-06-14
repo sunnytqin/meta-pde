@@ -39,12 +39,15 @@ flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
 def get_u(field_fn):
     def u(x):
         u_p = field_fn(x)
-        if len(u_p.shape) == 1:
-            return u_p[:-1]
-        elif len(u_p.shape) == 2:
-            return u_p[:, :-1]
+        if FLAGS.pde == 'pressurefree_stokes':
+            return u_p
         else:
-            raise Exception("Invalid shaped field")
+            if len(u_p.shape) == 1:
+                return u_p[:-1]
+            elif len(u_p.shape) == 2:
+                return u_p[:, :-1]
+            else:
+                raise Exception("Invalid shaped field")
 
     return u
 
@@ -84,7 +87,6 @@ def deviatoric_stress(x, field_fn, source_params):
 
     return 2 * mu_fn * strain_rate
 
-
 def loss_divu_fn(field_fn, points_in_domain, params):
     # force div(u) = 0
     source_params, bc_params, per_hole_params, n_holes = params
@@ -92,8 +94,19 @@ def loss_divu_fn(field_fn, points_in_domain, params):
 
     return div_u ** 2
 
+<<<<<<< Updated upstream
 
 def loss_stress_fn(field_fn, points_in_domain, params):
+=======
+def loss_neumann_fn(field_fn, points_on_outlet, params):
+    u = get_u(field_fn)
+    dudx1 = lambda x: jax.jacfwd(u)(x.reshape(2))[:, 0]
+    dudx1_all = jax.vmap(dudx1)(points_on_outlet)
+    return np.mean(dudx1_all **2, axis=1)
+
+
+def loss_stress_fn(field_fn, fa_p, points_in_domain, params):
+>>>>>>> Stashed changes
     # force div(grad(u) - p * I) = 0
     source_params, bc_params, per_hole_params, n_holes = params
 
@@ -108,11 +121,13 @@ def loss_stress_fn(field_fn, points_in_domain, params):
 
     else:
         gradu_fn = jax.jacfwd(get_u(field_fn))
-        gradu_plus_p_fn = lambda x: gradu_fn(x) - FLAGS.pressure_factor * get_p(field_fn)(
-            x
-        ) * np.eye(2)
+        if FLAGS.pde == 'pressurefree_stokes':
+            gradu_plus_p_fn = lambda x: gradu_fn(x) - \
+                                        FLAGS.pressure_factor * fa_p(x) * np.eye(2)
+        else:
+            gradu_plus_p_fn = lambda x: gradu_fn(x) - \
+                                        FLAGS.pressure_factor * get_p(field_fn)(x) * np.eye(2)
         err = vmap_divergence_tensor(points_in_domain, gradu_plus_p_fn)
-
 
     return (1.0 / FLAGS.pressure_factor ** 2) * np.mean(err ** 2, axis=1)
 
@@ -122,19 +137,21 @@ def loss_inlet_fn(field_fn, points_on_inlet, params):
     sinusoidal_magnitude = np.sin(
         np.pi * (points_on_inlet[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin)
     ).reshape(-1, 1)
+    u = get_u(field_fn)
 
     return (
-        field_fn(points_on_inlet)[:, :-1]
+        u(points_on_inlet)
         - bc_params[0] * sinusoidal_magnitude * np.array([1.0, 0.0]).reshape(1, 2)
     ) ** 2
 
 
 def loss_noslip_fn(field_fn, points_noslip, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    return field_fn(points_noslip)[:, :-1] ** 2
+    u = get_u(field_fn)
+    return u(points_noslip) ** 2
 
 
-def loss_fn(field_fn, points, params):
+def loss_fn(field_fn, fa_p, points, params):
     (
         points_on_inlet,
         points_on_outlet,
@@ -144,7 +161,11 @@ def loss_fn(field_fn, points, params):
     ) = points
     points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
-    p_outlet = get_p(field_fn)(points_on_outlet)
+    if FLAGS.pde == 'pressurefree_stokes':
+        p_outlet = fa_p(points_on_outlet)
+    else:
+        p_outlet = get_p(field_fn)(points_on_outlet)
+
     return (
         {
             "loss_noslip": np.mean(loss_noslip_fn(field_fn, points_noslip, params)),
@@ -152,8 +173,13 @@ def loss_fn(field_fn, points, params):
             "loss_p_outlet": np.mean(p_outlet ** 2),
         },
         {
+<<<<<<< Updated upstream
             "loss_stress": np.mean(loss_stress_fn(field_fn, points_in_domain, params)),
             #"loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
+=======
+            "loss_stress": np.mean(loss_stress_fn(field_fn, fa_p, points_in_domain, params)),
+            "loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
+>>>>>>> Stashed changes
         },
     )
 

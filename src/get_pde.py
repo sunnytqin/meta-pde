@@ -1,6 +1,11 @@
 from absl import flags
 from .poisson import poisson_def
 from .stokes import stokes_def
+<<<<<<< Updated upstream
+=======
+from .stokes import pfreestokes_def
+from .burgers import burgers_def
+>>>>>>> Stashed changes
 
 
 
@@ -16,6 +21,11 @@ def get_pde(pde_name):
         FLAGS.stokes_nonlinear = False
         FLAGS.domain_loss = "loss_stress"
         return stokes_def
+
+    elif pde_name == 'pressurefree_stokes':
+        FLAGS.stokes_nonlinear = False
+        FLAGS.domain_loss = 'loss_stress'
+        return pfreestokes_def
 
     elif pde_name == "nonlinear_stokes":
         FLAGS.stokes_nonlinear = True

@@ -59,8 +59,8 @@ def main(argv):
 
     # --------------------- Defining the training algorithm --------------------
 
-    def loss_fn(field_fn, points, params):
-        boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
+    def loss_fn(field_fn, fa_p, points, params):
+        boundary_losses, domain_losses = pde.loss_fn(field_fn, fa_p, points, params)
         loss = np.sum(
             np.array([bl for bl in boundary_losses.values()])
         ) + np.sum(
@@ -69,12 +69,12 @@ def main(argv):
         # return the total loss, and as aux a dict of individual losses
         return loss, {**boundary_losses, **domain_losses}
 
-    def task_loss_fn(key, model):
+    def task_loss_fn(key, model, fa_p):
         # The input key is terminal
         k1, k2 = jax.random.split(key, 2)
         params = pde.sample_params(k1)
         points = pde.sample_points(k2, FLAGS.outer_points, params)
-        return loss_fn(model, points, params)
+        return loss_fn(model, fa_p, points, params)
 
     @jax.jit
     def batch_loss_fn(key, model, bc_weights_prev):
@@ -114,12 +114,12 @@ def main(argv):
 
         return loss, (loss_aux, bc_weights)
 
-    @jax.jit
-    def get_grad_norms(key, model):
-        _, (loss_dict, _) = batch_loss_fn(key, model, None)
+    @partial(jax.jit, static_argnums=[2])
+    def get_grad_norms(key, model, fa_p):
+        _, (loss_dict, _) = batch_loss_fn(key, model, fa_p, None)
         losses_and_grad_norms = {}
         for k in loss_dict:
-            single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][0][k]
+            single_loss_fn = lambda model: batch_loss_fn(key, model, fa_p, None)[1][0][k]
             loss_val, loss_grad = jax.value_and_grad(single_loss_fn)(model)
             loss_grad_norm = np.sqrt(
                 jax.tree_util.tree_reduce(
@@ -196,42 +196,149 @@ def main(argv):
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
+<<<<<<< Updated upstream
     bc_weights = defaultdict(lambda: 1.0)
+=======
+    dummy_flat_grad, dummy_treedef = jax.tree_flatten(optimizer.target)
+    dummy_shapes = tuple(x.shape for x in dummy_flat_grad)
+    dummy_sizes = tuple(x.size for x in dummy_flat_grad)
+    fins = np.cumsum(np.array(dummy_sizes))
+    starts = fins - np.array(dummy_sizes)
+
+    fins = tuple(fins.tolist())
+    starts = tuple(starts.tolist())
+
+    @jax.jit
+    def reform(flat_arr):
+        out_list = []
+        for i in range(len(dummy_shapes)):
+            out_list.append(np.reshape(flat_arr[starts[i]:fins[i]],
+                                       dummy_shapes[i]))
+        return jax.tree_unflatten(dummy_treedef, out_list)
+
+    @jax.jit
+    def perform_pcgrad(loss_grads):
+        # define projection function
+        project = partial(pcgrad.project_grads, FLAGS.pcgrad_norm)
+
+        loss_grads_flat = {k: np.concatenate([arr.flatten() for arr in jax.tree_flatten(v)[0]])
+            for k, v in loss_grads.items()}
+        # for new individual loss gradient
+        loss_grads_new = {}
+
+        total_grad_new = 0.
+
+        # perform PC grad for each loss type
+        for k in loss_grads_flat:
+            grad = loss_grads_flat[k]
+            other_grads = {k1: v1 for k1, v1 in loss_grads_flat.items() if k1 != k}
+            loss_grad_new = project(grad, *other_grads.values())
+            # update the new projected individual loss function
+            loss_grads_new[k] = reform(loss_grad_new)
+
+            # update gradient for the entire loss function
+            total_grad_new = loss_grad_new + total_grad_new
+
+        total_grad_new = reform(total_grad_new)
+
+        return total_grad_new, loss_grads_new
+
+    @partial(jax.jit, static_argnums=[2])
+    def batch_loss_fn(key, model, fa_p, bc_weights_prev):
+        vmap_task_loss_fn = jax.vmap(task_loss_fn, (0, None, None))
+
+        keys = jax.random.split(key, FLAGS.bsize)
+        _, loss_dict = vmap_task_loss_fn(keys, model, fa_p)
+
+        loss_aux = {}  # store original loss by loss type
+        loss_grads = {}  # store original loss gradient by loss type
+
+        # get original gradients
+        for k in loss_dict:
+            loss_aux[k] = np.mean(loss_dict[k])
+            # do nothing if not annealing and not pcgrad-ing
+            if (not FLAGS.annealing and not FLAGS.pcgrad):
+                continue
+            single_loss_fn = lambda model: np.mean(vmap_task_loss_fn(keys, model, fa_p)[1][k])
+            _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
+            loss_grads[k] = loss_grad
+
+        # perform PC grad
+        if FLAGS.pcgrad:
+            # place holder for new total loss gradient
+            #total_grad_new = [np.zeros_like(x)
+            #                  for x in jax.tree_flatten(loss_grad)[0]]
+            # pdb.set_trace()
+            _, loss_grads = perform_pcgrad(loss_grads)
+
+        # perform weight annealing
+        if FLAGS.annealing:
+            bc_weights = perform_annealing(loss_grads, bc_weights_prev)
+            loss = np.sum(np.array([bc_weights[k] * v for k, v in loss_aux.items()]))
+        else:
+            bc_weights = None
+            loss = np.sum(np.array([v*(FLAGS.bc_weight if k != FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
+
+        # recompute loss
+
+        return loss, (loss_aux, bc_weights)
+
+    bc_weights = None
+>>>>>>> Stashed changes
 
     # --------------------- Defining the evaluation functions --------------------
 
 
-    def get_final_model(unused_key, model,
+    def get_final_model_ld(unused_key, model,
                          _unused_params=None,
                          _unused_num_steps=None,
                          _unused_meta_alg_def=None):
         # Input key is terminal
         return model
 
-    @jax.jit
-    def make_coef_func(key, model, params, coords):
+    def get_final_model(unused_key, model, fa_p=None,
+                         _unused_params=None,
+                         _unused_num_steps=None,
+                         _unused_meta_alg_def=None
+                         ):
+        if fa_p is None:
+            return model
+        else:
+            def final_model(x):
+                velocity = model(x)
+                pressure = fa_p(x)
+                assembled = np.stack((velocity[:, 0], velocity[:, 1], pressure), axis=-1)
+                return assembled
+            return final_model
+
+    def make_coef_func(key, params, coords, model, fa_p):
         # Input key is terminal
-        final_model = get_final_model(key, model, params)
+        final_model = get_final_model(key, model, fa_p, params)
 
         return np.squeeze(final_model(coords))
 
 
 
-    @jax.jit
-    def train_step(key, optimizer, bc_weights_prev):
+    @partial(jax.jit, static_argnums=[2])
+    def train_step(key, optimizer, fa_p, bc_weights_prev):
 
         if FLAGS.optimizer == "adahessian":
             k1, k2 = jax.random.split(key)
+<<<<<<< Updated upstream
             loss, (loss_aux, bc_weights) = batch_loss_fn(k1, optimizer.target, bc_weights_prev)
+=======
+            loss, (loss_aux, bc_weights) = batch_loss_fn(
+                k1, optimizer.target, fa_p, bc_weights_prev)
+>>>>>>> Stashed changes
             batch_grad, batch_hess = grad_and_hessian(
-                lambda model: batch_loss_fn(k1, model, bc_weights)[0],
+                lambda model: batch_loss_fn(k1, model, fa_p, bc_weights)[0],
                 (optimizer.target,),
                 k2,
             )
         else:
             (loss, (loss_aux, bc_weights)), batch_grad = jax.value_and_grad(
                 batch_loss_fn, argnums=1, has_aux=True
-            )(key, optimizer.target, bc_weights_prev)
+            )(key, optimizer.target, fa_p, bc_weights_prev)
 
 
         grad_norm = np.sqrt(
@@ -257,9 +364,9 @@ def main(argv):
 
         return optimizer, loss, loss_aux, grad_norm, bc_weights
 
-    @jax.jit
-    def validation_losses(model):
-        return task_loss_fn(jax.random.PRNGKey(0), model)[0]
+    @partial(jax.jit, static_argnums=[1])
+    def validation_losses(model, fa_p):
+        return task_loss_fn(jax.random.PRNGKey(0), model, fa_p)[0]
 
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 
@@ -271,6 +378,20 @@ def main(argv):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
+    if FLAGS.pde == 'pressurefree_stokes':
+        assert len(fenics_functions) == 1
+        key, subkey = jax.random.split(key)
+        ground_truth = fenics_functions[0]
+        points = pde.sample_points(subkey,
+                                   3 * FLAGS.validation_points,
+                                   jax_tools.tree_unstack(gt_params)[0])
+        points = np.concatenate(points)
+        taylor_fn = pde.SecondOrderTaylorLookup(ground_truth, points, d=3)
+        fa_p = pde.get_p(taylor_fn)
+
+    else:
+        fa_p = None
+
     # --------------------- Run MAML --------------------
 
     time_last_log = time.time()
@@ -278,7 +399,7 @@ def main(argv):
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
-            optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, bc_weights)
+            optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, fa_p, bc_weights)
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
         # points; plotting the losses at those points.
@@ -288,7 +409,7 @@ def main(argv):
             FLAGS.measure_grad_norm_every > 0
             and step % FLAGS.measure_grad_norm_every == 0
         ):
-            loss_vals_and_grad_norms = get_grad_norms(subkey, optimizer.target)
+            loss_vals_and_grad_norms = get_grad_norms(subkey, optimizer.target, fa_p)
             loss_vals_and_grad_norms = {k: (float(v[0]), float(v[1]))
                                         for k, v in loss_vals_and_grad_norms.items()}
             log("loss vals and grad norms: ", loss_vals_and_grad_norms)
@@ -320,6 +441,7 @@ def main(argv):
                 _boundary_losses, _domain_losses = jax.vmap(
                     lambda x: pde.loss_fn(
                         optimizer.target,
+                        fa_p,
                         (x.reshape(1, -1) for _ in range(len(_points))),
                         _params,
                     )
@@ -353,12 +475,12 @@ def main(argv):
         if step % FLAGS.val_every == 0:
             with Timer() as deploy_timer:
                 mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
-                    optimizer.target, gt_params, coords, fenics_vals, make_coef_func
+                    optimizer.target, fa_p, gt_params, coords, fenics_vals, make_coef_func
                 )
                 mse.block_until_ready()
             deployment_time = deploy_timer.interval / FLAGS.n_eval
 
-            val_loss = validation_losses(optimizer.target)
+            val_loss = validation_losses(optimizer.target, fa_p)
 
         if step % FLAGS.log_every == 0:
             if step > 0:
@@ -421,7 +543,7 @@ def main(argv):
             plt.figure()
             # pdb.set_trace()
             trainer_util.compare_plots_with_ground_truth(
-                optimizer.target,
+                (optimizer.target, fa_p),
                 pde,
                 fenics_functions,
                 gt_params,
@@ -441,9 +563,10 @@ def main(argv):
 
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
-        optimizer.target, pde, fenics_functions, gt_params, get_final_model, None, 0,
+        (optimizer.target, fa_p), pde, fenics_functions, gt_params, get_final_model, None, 0,
     )
     if FLAGS.expt_name is not None:
+        plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
     else:
         plt.show()
