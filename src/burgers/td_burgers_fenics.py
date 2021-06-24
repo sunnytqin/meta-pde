@@ -12,12 +12,18 @@ import pdb
 import argparse
 import jax
 from collections import namedtuple
+import os, imageio
 
 from absl import app
 from absl import flags
 from ..util import common_flags
 
 FLAGS = flags.FLAGS
+
+T = 20.
+num_tsteps = 20
+dt = T/num_tsteps
+
 
 from .burgers_common import (
     plot_solution,
@@ -59,10 +65,14 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     )
     source_params, bc_params, per_hole_params, n_holes = params
     # pdb.set_trace()
+
+    n_holes = 0
+
     holes = [
         make_domain(c1, c2, boundary_points, x0, y0, size)
         for c1, c2, x0, y0, size in per_hole_params[:n_holes]
     ]
+
     if n_holes > 0:
         obstacle = holes[0]
         for o2 in holes[1:]:
@@ -71,17 +81,19 @@ def solve_fenics(params, boundary_points=24, resolution=16):
 
     mesh = mshr.generate_mesh(domain, resolution)
 
-    def inlet(x, on_boundary):
-        return on_boundary and fa.near(x[0], FLAGS.xmin)
+    def vertical_walls(x, on_boundary):
+        return on_boundary and (fa.near(x[0], FLAGS.xmin) or fa.near(x[0], FLAGS.xmax))
 
-    def outlet(x, on_boundary):
-        return on_boundary and fa.near(x[0], FLAGS.xmax)
+    def horizontal_walls(x, on_boundary):
+        return on_boundary and (fa.near(x[1], FLAGS.ymin) or fa.near(x[1], FLAGS.ymax))
 
-    def walls(x, on_boundary):
+    def non_slip_walls(x, on_boundary):
         return on_boundary and (
-            (fa.near(x[1], FLAGS.ymin) or fa.near(x[1], FLAGS.ymax))
-            or (not (fa.near(x[0], FLAGS.xmin) or fa.near(x[0], FLAGS.xmax)))
+            (not (fa.near(x[0], FLAGS.xmin) or fa.near(x[0], FLAGS.xmax)))
+            and
+            (not (fa.near(x[1], FLAGS.ymin) or fa.near(x[1], FLAGS.ymax)))
         )
+
 
     V = fa.VectorFunctionSpace(mesh, "P", 3)
 
@@ -90,33 +102,48 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     du = fa.TrialFunction(V)
 
     # Define function for setting Dirichlet values
-    lhs_expr = fa.Expression(
-        ("A0*sin(pi*(x[1]-ymin)/(ymax-ymin))", "A1*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
-        A0=float(bc_params[0,0]),
-        A1=float(bc_params[0,1]),
+    vertical_expr = fa.Expression(
+        ("0.0",
+         "A1*cos(pi*(x[0]-xmin)/(xmax-xmin))*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
+        A0=float(np.abs(bc_params[0, 0])),
+        A1=float(np.abs(bc_params[0, 1])),
+        xmax=FLAGS.xmax,
+        xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
         ymin=FLAGS.ymin,
         element=V.ufl_element(),
     )
 
-    rhs_expr = fa.Expression(
-        ("A0*sin(pi*(x[1]-ymin)/(ymax-ymin))","A1*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
-        A0=float(bc_params[1,0]),
-        A1=float(bc_params[1,1]),
+    horizontal_expr = fa.Expression(
+        ("A0*sin(pi*(x[0]-xmin)/(xmax-xmin))*cos(pi*(x[1]-ymin)/(ymax-ymin))",
+         "0.0"),
+        A0=float(np.abs(bc_params[0, 0])),
+        A1=float(np.abs(bc_params[0, 1])),
+        xmax=FLAGS.xmax,
+        xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
         ymin=FLAGS.ymin,
         element=V.ufl_element(),
     )
-    lhs_u = fa.project(lhs_expr, fa.VectorFunctionSpace(mesh, "P", 2))
-    # fa.plot(lhs_u)
-    # plt.show()
-    # pdb.set_trace()
-    bc_in = fa.DirichletBC(V, lhs_expr, inlet)
-    bc_out = fa.DirichletBC(V, rhs_expr, outlet)
-    bc_walls = fa.DirichletBC(V, fa.Constant((0.0, 0.0)), walls)
-    # bc_pressure = fa.DirichletBC(Q, fa.Constant((1.)), inlet)
 
-    dx = fa.Measure("dx")
+    non_slip = fa.Constant((0.0, 0.0))
+
+    u_D = fa.Expression(
+        ("A0*sin(pi*(x[0]-xmin)/(xmax-xmin))*cos(pi*(x[1]-ymin)/(ymax-ymin))",
+         "A1*cos(pi*(x[0]-xmin)/(xmax-xmin))*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
+        A0=float(np.abs(bc_params[0, 0])),
+        A1=float(np.abs(bc_params[0, 1])),
+        xmax=FLAGS.xmax,
+        xmin=FLAGS.xmin,
+        ymax=FLAGS.ymax,
+        ymin=FLAGS.ymin,
+        element=V.ufl_element())
+
+    u_n = fa.project(u_D, V)
+    bc_vertical = fa.DirichletBC(V, vertical_expr, vertical_walls)
+    bc_horizontal = fa.DirichletBC(V, horizontal_expr, horizontal_walls)
+    #bc_nonslip = fa.DirichletBC(V, non_slip, non_slip_walls)
+
 
     # Define variational problem
     u.vector().set_local(np.random.randn(len(u.vector())) * 1e-6)
@@ -127,8 +154,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
 
 
     # (u ux - uxx)  +  (v uy - uyy)
+    reynolds = float(1 / source_params[0])
 
-    lhs_term = fa.inner(fa.grad(u) * u, v)
+    lhs_term = fa.dot(u, v) + \
+               reynolds * dt * fa.inner(fa.grad(u), fa.grad(v)) - \
+               dt * fa.inner(fa.grad(u) * u, v)
 
     # [ u0xx + u0yy
     #   u1xx + u1yy ]
@@ -136,13 +166,13 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     #  u0xx * v0 -> - u0x * v0x
     #  u0yy * v0 -> u0y * v0y
 
-    rhs_term = fa.inner(u.dx(0), v.dx(0)) + fa.inner(u.dx(1), v.dx(1))
+    rhs_term = fa.dot(u_n, v)
 
-    # rhs_term = fa.inner((u.dx(0).dx(0) + u.dx(1).dx(1)), v)
 
     F = (
         lhs_term * fa.dx - rhs_term * fa.dx
     )
+
     solver_parameters = {
         "newton_solver": {
             "maximum_iterations": FLAGS.max_newton_steps,
@@ -150,21 +180,41 @@ def solve_fenics(params, boundary_points=24, resolution=16):
             "linear_solver": "mumps",
         }}
 
-    try:
-        fa.solve(
-            F == 0,
-            u,
-            [bc_walls, bc_in, bc_out],
-            solver_parameters=solver_parameters,
-        )
-    except Exception as e:
-        print("Failed solve: ", e)
-        print("Failed on params: ", params)
-        solver_parameters['newton_solver']['relaxation_parameter'] *= 0.2
-        fa.solve(F==0, u, [bc_walls, bc_in, bc_out], solver_parameters=solver_parameters)
+    tmp_filenames = []
+    for n in range(num_tsteps):
+        try:
+            fa.solve(
+                F == 0,
+                u,
+                [bc_vertical, bc_horizontal],
+                solver_parameters=solver_parameters,
+            )
+        except Exception as e:
+            print("Failed solve: ", e)
+            print("Failed on params: ", params)
+            solver_parameters['newton_solver']['relaxation_parameter'] *= 0.2
+            fa.solve(F == 0, u, [bc_vertical, bc_horizontal], solver_parameters=solver_parameters)
+
+        plt.figure(figsize=(5, 5))
+        fa.plot(u)
+        plt.savefig('timedependent_burger_' + str(n))
+        plt.close()
+        tmp_filenames.append('timedependent_burger_' + str(n)+'.png')
+
+        u_n.assign(u)
+
+    build_gif(tmp_filenames)
 
     return u
 
+
+def build_gif(filenames):
+    with imageio.get_writer('timedependent_burgers.gif', mode='I') as writer:
+        for f in filenames:
+            image = imageio.imread(f)
+            writer.append_data(image)
+    for f in set(filenames):
+        os.remove(f)
 
 def is_defined(xy, u):
     mesh = u.function_space().mesh()
@@ -230,11 +280,10 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
+    flags.DEFINE_float("xmin", 0.0, "scale on random uniform bc")
     flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
+    flags.DEFINE_float("ymin", 0.0, "scale on random uniform bc")
     flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_float("pressure_factor", 10.0, "scale on random uniform bc")
     flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
     flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
     app.run(main)
