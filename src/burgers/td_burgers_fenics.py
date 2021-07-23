@@ -12,7 +12,8 @@ import pdb
 import argparse
 import jax
 from collections import namedtuple
-import os, imageio
+import os
+import imageio
 
 from absl import app
 from absl import flags
@@ -20,20 +21,15 @@ from ..util import common_flags
 
 FLAGS = flags.FLAGS
 
-T = 20.
-num_tsteps = 20
-dt = T/num_tsteps
 
-
-from .burgers_common import (
+from .td_burgers_common import (
     plot_solution,
     loss_fn,
-    fenics_to_jax,
     SecondOrderTaylorLookup,
     error_on_coords,
     sample_params,
     sample_points,
-    is_in_hole,
+    GroundTruth,
 )
 
 
@@ -66,7 +62,6 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     source_params, bc_params, per_hole_params, n_holes = params
     # pdb.set_trace()
 
-    n_holes = 0
 
     holes = [
         make_domain(c1, c2, boundary_points, x0, y0, size)
@@ -156,6 +151,8 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     # (u ux - uxx)  +  (v uy - uyy)
     reynolds = float(1 / source_params[0])
 
+    dt = (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
+
     lhs_term = fa.dot(u, v) + \
                reynolds * dt * fa.inner(fa.grad(u), fa.grad(v)) - \
                dt * fa.inner(fa.grad(u) * u, v)
@@ -181,7 +178,9 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         }}
 
     tmp_filenames = []
-    for n in range(num_tsteps):
+    u_list = []
+    t_list = []
+    for n in range(FLAGS.num_tsteps):
         try:
             fa.solve(
                 F == 0,
@@ -195,21 +194,28 @@ def solve_fenics(params, boundary_points=24, resolution=16):
             solver_parameters['newton_solver']['relaxation_parameter'] *= 0.2
             fa.solve(F == 0, u, [bc_vertical, bc_horizontal], solver_parameters=solver_parameters)
 
+        u_list.append(u.copy(deepcopy=True))
+        u_n.assign(u)
+        t_list.append(FLAGS.tmin + dt * n)
+
+    for n in range(FLAGS.num_tsteps):
+        u = u_list[n]
         plt.figure(figsize=(5, 5))
         fa.plot(u)
         plt.savefig('timedependent_burger_' + str(n))
         plt.close()
-        tmp_filenames.append('timedependent_burger_' + str(n)+'.png')
-
-        u_n.assign(u)
-
+        tmp_filenames.append('timedependent_burger_' + str(n) + '.png')
     build_gif(tmp_filenames)
 
-    return u
+    print('Time steps solved by fenics', t_list)
+
+    return GroundTruth(u_list, np.array(t_list))
 
 
-def build_gif(filenames):
-    with imageio.get_writer('timedependent_burgers.gif', mode='I') as writer:
+def build_gif(filenames, outfile=None):
+    if outfile is None:
+        outfile = 'td_burgers.gif'
+    with imageio.get_writer(outfile, mode='I') as writer:
         for f in filenames:
             image = imageio.imread(f)
             writer.append_data(image)
@@ -230,9 +236,10 @@ def main(argv):
 
     print("params: ", params)
 
-    u = solve_fenics(params, resolution=FLAGS.ground_truth_resolution,
+    ground_truth = solve_fenics(params, resolution=FLAGS.ground_truth_resolution,
                      boundary_points=int(FLAGS.boundary_resolution_factor*FLAGS.ground_truth_resolution))
 
+    u = ground_truth[-1]
     x = np.array(u.function_space().tabulate_dof_coordinates()[:100])
 
     points = sample_points(jax.random.PRNGKey(FLAGS.seed + 1), 128, params)
@@ -287,5 +294,5 @@ if __name__ == "__main__":
     flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
     flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
     app.run(main)
-    args = parser.parse_args()
-    args = namedtuple("ArgsTuple", vars(args))(**vars(args))
+    #args = parser.parse_args()
+    #args = namedtuple("ArgsTuple", vars(args))(**vars(args))

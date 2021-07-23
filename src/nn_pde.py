@@ -50,6 +50,9 @@ def main(argv):
 
     FLAGS.n_eval = 1
     FLAGS.fixed_num_pdes = 1
+    FLAGS.vary_bc = False
+    FLAGS.vary_source = False
+    FLAGS.vary_geometry = False
 
     pde = get_pde(FLAGS.pde)
 
@@ -143,7 +146,14 @@ def main(argv):
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+    _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
+
+    #for k, v in init_params.items():
+    #    print(f"Layer {k}")
+    #    for k2, v2 in v.items():
+    #        print(f"     info -> {k2}: {v2.shape}")
+    #print(init_params)
+    #quit()
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -197,6 +207,7 @@ def main(argv):
 
         keys = jax.random.split(key, FLAGS.bsize)
         _, loss_dict = vmap_task_loss_fn(keys, model, fa_p)
+        #loss, loss_dict, params_new = task_loss_fn(key, model, fa_p)
 
         loss_aux = {}  # store original loss by loss type
         loss_grads = {}  # store original loss gradient by loss type
@@ -207,12 +218,14 @@ def main(argv):
             # do nothing if not annealing and not pcgrad-ing
             if (not FLAGS.annealing and not FLAGS.pcgrad):
                 continue
+            assert False
             single_loss_fn = lambda model: np.mean(vmap_task_loss_fn(keys, model, fa_p)[1][k])
             _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
             loss_grads[k] = loss_grad
 
         # perform PC grad
         if FLAGS.pcgrad:
+            assert False
             # place holder for new total loss gradient
             #total_grad_new = [np.zeros_like(x)
             #                  for x in jax.tree_flatten(loss_grad)[0]]
@@ -225,7 +238,7 @@ def main(argv):
             loss = np.sum(np.array([bc_weights[k] * v for k, v in loss_aux.items()]))
         else:
             bc_weights = None
-            loss = np.sum(np.array([v*(FLAGS.bc_weight if k != FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
+            loss = np.sum(np.array([v*(FLAGS.bc_weight if k not in FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
 
         # recompute loss
 
@@ -236,7 +249,7 @@ def main(argv):
     # --------------------- Defining the evaluation functions --------------------
 
 
-    def get_final_model_ld(unused_key, model,
+    def get_final_model_old(unused_key, model,
                          _unused_params=None,
                          _unused_num_steps=None,
                          _unused_meta_alg_def=None):
@@ -248,15 +261,42 @@ def main(argv):
                          _unused_num_steps=None,
                          _unused_meta_alg_def=None
                          ):
-        if fa_p is None:
-            return model
-        else:
+        if fa_p is not None:
             def final_model(x):
                 velocity = model(x)
                 pressure = fa_p(x)
                 assembled = np.stack((velocity[:, 0], velocity[:, 1], pressure), axis=-1)
                 return assembled
             return final_model
+        elif FLAGS.pde == 'td_burgers':
+            def final_model(x):
+                if x.shape[-1] == 2:  # add time axis if missing time-dimension
+                    t_list = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)
+                    t_idx = npo.unique(npo.linspace(0, len(t_list), 2, endpoint=False, dtype=int)[1:])
+                    t_supp = np.squeeze(t_list[t_idx])
+                    print(f'plotting final model at t = {t_supp}')
+                    t_supp = np.repeat(t_supp, x.shape[0]).reshape(x.shape[0], 1)
+
+                    x = np.concatenate([x, t_supp], axis=1)
+                return model(x)
+
+            return final_model
+        else:
+            return model
+
+    #def get_final_model_snapshot(unused_key, model, fa_p=None,
+    #                     _unused_params=None,
+    #                     _unused_num_steps=None,
+    #                     _unused_meta_alg_def=None
+    #                     ):
+    #    def final_model(x):
+    #        # add time axis
+    #        t = np.squeeze(np.linspace(FLAGS.tmin, FLAGS.tmax, 2, endpoint=False)[1: ])
+    #        t = np.repeat(t, x.shape[0]).reshape(x.shape[0], 1)
+    #        xy_t = np.concatenate([x, t], axis=1)
+    #        return (model(xy_t))
+
+    #    return final_model
 
     def make_coef_func(key, params, coords, model, fa_p):
         # Input key is terminal
@@ -312,6 +352,7 @@ def main(argv):
         return task_loss_fn(jax.random.PRNGKey(0), model, fa_p)[0]
 
     key, gt_key, gt_points_key = jax.random.split(key, 3)
+    #print('sample param key: ', gt_key)
 
     gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
     gt_params = vmap(pde.sample_params)(gt_keys)
@@ -444,10 +485,16 @@ def main(argv):
                         "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
 
+        t_list = []
+        for i in range(coords.shape[1] // FLAGS.validation_points):
+            t_idx = np.squeeze(np.arange(i * FLAGS.validation_points, (i + 1) * FLAGS.validation_points))
+            t_unique = np.unique(coords[:, t_idx, 2])
+            t_list.append(np.squeeze(t_unique))
+            assert len(t_unique) == 1
 
-        if step % FLAGS.val_every == 0:
+        if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
-                mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = trainer_util.vmap_validation_error(
                     optimizer.target, fa_p, gt_params, coords, fenics_vals, make_coef_func
                 )
                 mse.block_until_ready()
@@ -455,7 +502,7 @@ def main(argv):
 
             val_loss = validation_losses(optimizer.target, fa_p)
 
-        if step % FLAGS.log_every == 0:
+        # if step % FLAGS.log_every == 0:
             if step > 0:
                 log("time {} steps: {}".format(FLAGS.log_every,
                                                time.time() - time_last_log))
@@ -464,7 +511,7 @@ def main(argv):
             log(
                 "step: {}, loss: {}, val_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
-                "per_dim_rel_err: {}, deployment_time: {}, grad_norm: {}, time: {}".format(
+                "per_dim_rel_err: {}, deployment_time: {}, grad_norm: {}, per_time_step_error: {} ,time: {}".format(
                     step,
                     loss,
                     val_loss,
@@ -475,10 +522,10 @@ def main(argv):
                     per_dim_rel_err,
                     deployment_time,
                     grad_norm,
+                    t_rel_sq_err,
                     t.interval,
                 )
             )
-
 
             if tflogger is not None:
                 # A lot of these names have unnecessary "meta_"
@@ -490,6 +537,11 @@ def main(argv):
                 tflogger.log_scalar("std_val_rel_mse", float(rel_err_std), step)
 
                 tflogger.log_scalar("val_mse", float(mse), step)
+
+                for i in range(len(t_rel_sq_err)):
+                    tflogger.log_scalar(
+                        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
+                    )
 
                 for i in range(len(per_dim_rel_err)):
                     tflogger.log_scalar(
@@ -513,7 +565,6 @@ def main(argv):
             log("time for logging {}".format(time.time() - time_last_log))
             time_last_log = time.time()
 
-
         if FLAGS.viz_every > 0 and step % FLAGS.viz_every == 0:
             plt.figure()
             # pdb.set_trace()
@@ -532,6 +583,18 @@ def main(argv):
 
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
+
+            if FLAGS.pde == 'td_burgers':
+                tmp_filenames = trainer_util.plot_model_time_series(
+                    optimizer.target,
+                    pde,
+                    fenics_functions,
+                    gt_params,
+                    get_final_model,
+                    None,
+                    0,
+                )
+                pde.build_gif(tmp_filenames, outfile="td_burger_step_{}.gif".format(step))
 
     #if FLAGS.expt_name is not None:
     #    outfile.close()

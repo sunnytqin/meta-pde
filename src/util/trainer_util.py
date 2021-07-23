@@ -21,6 +21,7 @@ from adahessianJax.flaxOptimizer import Adahessian
 from functools import partial
 
 import fenics as fa
+import imageio
 
 from . import jax_tools
 
@@ -55,7 +56,10 @@ def get_ground_truth_points(
         ground_truth = pde.solve_fenics(
             params, resolution=resolution, boundary_points=boundary_points
         )
-        fn_coords = pde.sample_points_in_domain(key, FLAGS.validation_points, params)
+        k1, k2 = jax.random.split(key)
+        domain_coords = pde.sample_points_in_domain(k1, FLAGS.validation_points, params)
+        init_coords = pde.sample_points_initial(k2, FLAGS.validation_points, params)
+        fn_coords = np.concatenate([init_coords, domain_coords])
         ground_truth.set_allow_extrapolation(True)
         coefs.append(np.array([ground_truth(x) for x in fn_coords]))
         coords.append(fn_coords)
@@ -112,13 +116,16 @@ def compare_plots_with_ground_truth(
 
         plt.subplot(inner_steps + 2, min([N, 8]), 1 + i)
         plt.axis("off")
+        plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
+        plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
         ground_truth.set_allow_extrapolation(False)
         pde.plot_solution(ground_truth, params_list[i])
         if i == 0:
-            plt.ylabel("Truth")
-
+            plt.title("Truth", fontsize=6)
         for j in range(inner_steps + 1):
             plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
+            plt.axis("off")
+
             model, fa_p = model
             final_model = get_final_model(
                 keys[i], model, fa_p, params_list[i], j, meta_alg_def,
@@ -142,9 +149,79 @@ def compare_plots_with_ground_truth(
             u_approx.vector().set_local(out)
 
             pde.plot_solution(u_approx, params_list[i])
-            plt.axis("off")
             if i == 0:
-                plt.ylabel("Model: {} steps".format(j))
+                plt.title("NN Model", fontsize=6)
+
+def plot_model_time_series(
+    model,
+    pde,
+    fenics_functions,
+    params_stacked,
+    get_final_model,
+    meta_alg_def,
+    inner_steps,
+):
+    """plot time series gif
+    """
+    keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
+    N = len(fenics_functions)
+
+    params_list = jax_tools.tree_unstack(params_stacked)
+
+    for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
+        ground_truth = fenics_functions[i]
+        tmp_filenames = []
+        for t in range(FLAGS.num_tsteps):
+            plt.figure()
+            plt.subplot(inner_steps + 2, min([N, 8]), 1 + i)
+            plt.axis("off")
+            plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
+            plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
+            ground_truth.set_allow_extrapolation(False)
+            t_val = ground_truth.timesteps_list[t]
+            pde.plot_solution(ground_truth[t], params_list[i])
+            if i == 0:
+                plt.title("t = {:.2f} \n Truth".format(t_val), fontsize=6)
+            for j in range(inner_steps + 1):
+                plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
+                plt.axis("off")
+
+                #model, fa_p = model
+                fa_p = None
+                final_model = get_final_model(
+                    keys[i], model, fa_p, params_list[i], j, meta_alg_def,
+                )
+
+                coords = ground_truth.function_space().tabulate_dof_coordinates()
+
+                # add time dimension
+                t_val_expand = np.repeat(t_val, len(coords)).reshape(-1, 1)
+                coords_t = np.concatenate([coords, t_val_expand], axis=1)
+
+                dofs = final_model(np.array(coords_t))
+
+                out = npo.zeros(len(coords))
+
+                extract_coefs_by_dim(ground_truth.function_space(), dofs, out)
+
+                u_approx = fa.Function(ground_truth.function_space())
+
+                fenics_shape = npo.array(u_approx.vector()).shape
+                assert fenics_shape == out.shape, "Mismatched shapes {} and {}".format(
+                    fenics_shape, out.shape
+                )
+
+                u_approx.vector().set_local(out)
+
+                pde.plot_solution(u_approx, params_list[i])
+                if i == 0:
+                    plt.title("NN Model", fontsize=6)
+                # save fig here
+                plt.savefig('timedependent_burger_' + str(t) + '.png', dpi=400)
+                plt.close()
+                tmp_filenames.append('timedependent_burger_' + str(t) + '.png')
+        #build_gif(tmp_filenames)
+    return tmp_filenames
 
 
 def prepare_logging(out_dir, expt_name):
@@ -177,7 +254,7 @@ def prepare_logging(out_dir, expt_name):
 
 @partial(jax.jit, static_argnums=[1, 5])
 def vmap_validation_error(
-    model, fa_p, ground_truth_params, points, ground_truth_vals, make_coef_func,
+    model, fa_p, ground_truth_params, points, ground_truth_vals, make_coef_func
 ):
     key = jax.random.PRNGKey(0)
     keys = jax.random.split(key, FLAGS.n_eval)
@@ -194,12 +271,22 @@ def vmap_validation_error(
     normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
     rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
 
+    # if contains time dimension, add per time-stepping validation error
+    if points.shape[-1] == 3:
+        t_rel_sq_err = []
+        for i in range(coefs.shape[1] // FLAGS.validation_points):
+            t_idx = np.squeeze(np.arange(i * FLAGS.validation_points, (i + 1) * FLAGS.validation_points))
+            t_err = err[:, t_idx, :]
+            t_normalizer = np.mean(ground_truth_vals[:, t_idx, :] ** 2, axis=1, keepdims=True)
+            t_rel_sq_err.append(np.mean(t_err ** 2 / t_normalizer.mean(axis=2, keepdims=True)))
+
     return (
         mse,
         np.mean(normalizer, axis=(0, 1)),
         np.mean(rel_sq_err),
         np.mean(rel_sq_err, axis=(0, 1)),
-        np.std(np.mean(rel_sq_err, axis=(1, 2)))
+        np.std(np.mean(rel_sq_err, axis=(1, 2))),
+        np.array(t_rel_sq_err)
     )
 
 
