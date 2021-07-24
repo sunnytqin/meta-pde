@@ -28,11 +28,11 @@ from ..util import common_flags
 
 FLAGS = flags.FLAGS
 flags.DEFINE_float("tmin", 0.0, "PDE initial time")
-flags.DEFINE_float("tmax", 1.0, "PDE final time")
-flags.DEFINE_integer("num_tsteps", 4, "number of time steps for td_burgers")
+flags.DEFINE_float("tmax", 5.0, "PDE final time")
+flags.DEFINE_integer("num_tsteps", 20, "number of time steps for td_burgers")
 flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 FLAGS.bc_weight = 1.0
-FLAGS.viz_every = int(5e5)
+FLAGS.viz_every = int(2e5)
 FLAGS.log_every = int(1e4)
 FLAGS.outer_steps = int(1e7)
 
@@ -94,7 +94,7 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 def loss_vertical_fn(field_fn, points_on_vertical, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
+    A1 = (np.abs(bc_params[0, 0])).astype(float)
     sinusoidal_magnitude = A1 * \
                            np.cos(np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) *\
                            np.sin(np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -119,7 +119,7 @@ def loss_initial_fn(field_fn, points_initial, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
     A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
+    A1 = (np.abs(bc_params[0, 0])).astype(float)
     sinusoidal_magnitude_x = A0 * \
                              np.sin(np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
                              np.cos(np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -516,24 +516,25 @@ def plot_solution(u_list, params, t_val=None):
 
 
 def plot_solution_snapshot(u, params):
-    _, _, per_hole_params, num_holes = params
+    #_, _, per_hole_params, num_holes = params
 
-    X_, Y_ = npo.meshgrid(
-        npo.linspace(FLAGS.xmin, FLAGS.xmax, 18),
-        npo.linspace(FLAGS.ymin, FLAGS.ymax, 18),
-    )
-    Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
+    #X_, Y_ = npo.meshgrid(
+    #    npo.linspace(FLAGS.xmin, FLAGS.xmax, 18),
+    #    npo.linspace(FLAGS.ymin, FLAGS.ymax, 18),
+    #)
+    #Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
 
-    valid_ = [is_defined([x, y], u) for x, y in zip(Xflat_, Yflat_)]
-    Xflat_, Yflat_ = Xflat_[valid_], Yflat_[valid_]
-    UV_ = [u(x, y) for x, y in zip(Xflat_, Yflat_)]
+    #valid_ = [is_defined([x, y], u) for x, y in zip(Xflat_, Yflat_)]
+    #Xflat_, Yflat_ = Xflat_[valid_], Yflat_[valid_]
+    #UV_ = [u(x, y) for x, y in zip(Xflat_, Yflat_)]
 
-    U_ = npo.array([uv[0] for uv in UV_])
-    V_ = npo.array([uv[1] for uv in UV_])
+    #U_ = npo.array([uv[0] for uv in UV_])
+    #V_ = npo.array([uv[1] for uv in UV_])
 
-    speed_ = npo.linalg.norm(npo.stack([U_, V_], axis=1), axis=1)
+    #speed_ = npo.linalg.norm(npo.stack([U_, V_], axis=1), axis=1)
 
-    intensity = fa.inner(u, u) + 0.1
+    #intensity = fa.inner(u, u) + 0.1
+    intensity = fa.inner(u, u)
     fa.plot(intensity,
             mode="color",
             shading="gouraud",
@@ -541,8 +542,9 @@ def plot_solution_snapshot(u, params):
             linewidth=0.0,
             cmap="BuPu",
         )
+    fa.plot(u)
 
-    plt.quiver(Xflat_, Yflat_, U_, V_, 3 * speed_)
+    #plt.quiver(Xflat_, Yflat_, U_, V_, 3 * speed_)
 
     #plt.streamplot(
     #    X,

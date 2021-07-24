@@ -101,7 +101,7 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         ("0.0",
          "A1*cos(pi*(x[0]-xmin)/(xmax-xmin))*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
         A0=float(np.abs(bc_params[0, 0])),
-        A1=float(np.abs(bc_params[0, 1])),
+        A1=float(np.abs(bc_params[0, 0])),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
@@ -113,7 +113,7 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         ("A0*sin(pi*(x[0]-xmin)/(xmax-xmin))*cos(pi*(x[1]-ymin)/(ymax-ymin))",
          "0.0"),
         A0=float(np.abs(bc_params[0, 0])),
-        A1=float(np.abs(bc_params[0, 1])),
+        A1=float(np.abs(bc_params[0, 0])),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
@@ -127,7 +127,7 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         ("A0*sin(pi*(x[0]-xmin)/(xmax-xmin))*cos(pi*(x[1]-ymin)/(ymax-ymin))",
          "A1*cos(pi*(x[0]-xmin)/(xmax-xmin))*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
         A0=float(np.abs(bc_params[0, 0])),
-        A1=float(np.abs(bc_params[0, 1])),
+        A1=float(np.abs(bc_params[0, 0])),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
@@ -180,7 +180,10 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     tmp_filenames = []
     u_list = []
     t_list = []
-    for n in range(FLAGS.num_tsteps):
+    # append intial condition
+    u_list.append(u_n.copy(deepcopy=True))
+    t_list.append(FLAGS.tmin)
+    for n in range(FLAGS.num_tsteps - 1):
         try:
             fa.solve(
                 F == 0,
@@ -196,12 +199,22 @@ def solve_fenics(params, boundary_points=24, resolution=16):
 
         u_list.append(u.copy(deepcopy=True))
         u_n.assign(u)
-        t_list.append(FLAGS.tmin + dt * n)
+        t_list.append(FLAGS.tmin + dt * (n + 1))
 
     for n in range(FLAGS.num_tsteps):
         u = u_list[n]
+        intensity = fa.inner(u, u)
+
         plt.figure(figsize=(5, 5))
+        fa.plot(intensity,
+                mode="color",
+                shading="gouraud",
+                edgecolors="k",
+                linewidth=0.0,
+                cmap="BuPu",
+                )
         fa.plot(u)
+        plt.title('Ground Truth \n t = {:.2f}'.format(t_list[n]))
         plt.savefig('timedependent_burger_' + str(n))
         plt.close()
         tmp_filenames.append('timedependent_burger_' + str(n) + '.png')
