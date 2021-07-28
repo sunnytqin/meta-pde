@@ -101,7 +101,7 @@ def loss_neumann_fn(field_fn, points_on_outlet, params):
     return np.mean(dudx1_all **2, axis=1)
 
 
-def loss_stress_fn(field_fn, fa_p, points_in_domain, params):
+def loss_stress_fn(field_fn, points_in_domain, params):
     # force div(grad(u) - p * I) = 0
     source_params, bc_params, per_hole_params, n_holes = params
 
@@ -115,12 +115,12 @@ def loss_stress_fn(field_fn, fa_p, points_in_domain, params):
 
     else:
         gradu_fn = jax.jacfwd(get_u(field_fn))
-        if FLAGS.pde == 'pressurefree_stokes':
-            gradu_plus_p_fn = lambda x: gradu_fn(x) - \
-                                        FLAGS.pressure_factor * fa_p(x) * np.eye(2)
-        else:
-            gradu_plus_p_fn = lambda x: gradu_fn(x) - \
-                                        FLAGS.pressure_factor * get_p(field_fn)(x) * np.eye(2)
+        #if FLAGS.pde == 'pressurefree_stokes':
+        #    gradu_plus_p_fn = lambda x: gradu_fn(x) - \
+        #                                FLAGS.pressure_factor * fa_p(x) * np.eye(2)
+        #else:
+        gradu_plus_p_fn = lambda x: gradu_fn(x) - \
+                                    FLAGS.pressure_factor * get_p(field_fn)(x) * np.eye(2)
         err = vmap_divergence_tensor(points_in_domain, gradu_plus_p_fn)
 
     return (1.0 / FLAGS.pressure_factor ** 2) * np.mean(err ** 2, axis=1)
@@ -145,7 +145,7 @@ def loss_noslip_fn(field_fn, points_noslip, params):
     return u(points_noslip) ** 2
 
 
-def loss_fn(field_fn, fa_p, points, params):
+def loss_fn(field_fn, points, params):
     (
         points_on_inlet,
         points_on_outlet,
@@ -155,10 +155,11 @@ def loss_fn(field_fn, fa_p, points, params):
     ) = points
     points_noslip = np.concatenate([points_on_walls, points_on_holes])
 
-    if FLAGS.pde == 'pressurefree_stokes':
-        p_outlet = fa_p(points_on_outlet)
-    else:
-        p_outlet = get_p(field_fn)(points_on_outlet)
+    #if FLAGS.pde == 'pressurefree_stokes':
+    #    p_outlet = fa_p(points_on_outlet)
+    #else:
+    #    p_outlet = get_p(field_fn)(points_on_outlet)
+    p_outlet = get_p(field_fn)(points_on_outlet)
 
     return (
         {
@@ -168,7 +169,7 @@ def loss_fn(field_fn, fa_p, points, params):
             "loss_neumann_outlet": np.mean(loss_neumann_fn(field_fn, points_on_outlet, params))
         },
         {
-            "loss_stress": np.mean(loss_stress_fn(field_fn, fa_p, points_in_domain, params)),
+            "loss_stress": np.mean(loss_stress_fn(field_fn, points_in_domain, params)),
             "loss_divu": np.mean(loss_divu_fn(field_fn, points_in_domain, params)),
         },
     )

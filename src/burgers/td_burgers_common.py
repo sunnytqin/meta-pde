@@ -29,12 +29,17 @@ from ..util import common_flags
 FLAGS = flags.FLAGS
 flags.DEFINE_float("tmin", 0.0, "PDE initial time")
 flags.DEFINE_float("tmax", 5.0, "PDE final time")
-flags.DEFINE_integer("num_tsteps", 20, "number of time steps for td_burgers")
+flags.DEFINE_integer("num_tsteps", 10, "number of time steps for td_burgers")
 flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 FLAGS.bc_weight = 1.0
-FLAGS.viz_every = int(2e5)
+FLAGS.max_holes = 0
+FLAGS.viz_every = int(1e5)
 FLAGS.log_every = int(1e4)
-FLAGS.outer_steps = int(1e7)
+FLAGS.outer_steps = int(1e8)
+FLAGS.n_eval = 5
+FLAGS.outer_points = 64
+FLAGS.inner_points = 64
+FLAGS.validation_points = 512
 
 class GroundTruth:
     def __init__(self, fenics_functions_list, timesteps_list):
@@ -94,10 +99,11 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 def loss_vertical_fn(field_fn, points_on_vertical, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A1 = (np.abs(bc_params[0, 0])).astype(float)
-    sinusoidal_magnitude = A1 * \
-                           np.cos(np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) *\
-                           np.sin(np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+    A0 = (np.abs(bc_params[0, 0])).astype(float)
+    A1 = (np.abs(bc_params[0, 1])).astype(float)
+    sinusoidal_magnitude = A0 * \
+                           np.cos(A1 * np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) *\
+                           np.sin(A1 * np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
     zero_magnitude = np.zeros_like(sinusoidal_magnitude)
 
     return (field_fn(points_on_vertical) - np.stack((zero_magnitude, sinusoidal_magnitude), axis=-1)) ** 2
@@ -107,9 +113,10 @@ def loss_horizontal_fn(field_fn, points_on_horizontal, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
     A0 = (np.abs(bc_params[0, 0])).astype(float)
+    A1 = (np.abs(bc_params[0, 1])).astype(float)
     sinusoidal_magnitude = A0 * \
-                           np.sin(np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                           np.cos(np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+                           np.sin(A1 * np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
+                           np.cos(A1 * np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
     zero_magnitude = np.zeros_like(sinusoidal_magnitude)
 
     return (field_fn(points_on_horizontal) - np.stack((sinusoidal_magnitude, zero_magnitude), axis=-1)) ** 2
@@ -118,20 +125,19 @@ def loss_horizontal_fn(field_fn, points_on_horizontal, params):
 def loss_initial_fn(field_fn, points_initial, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 0])).astype(float)
+    A0 = (bc_params[0, 0]).astype(float)
+    A1 = (bc_params[0, 1]).astype(float)
     sinusoidal_magnitude_x = A0 * \
-                             np.sin(np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.cos(np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    sinusoidal_magnitude_y = A1 * \
-                             np.cos(np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.sin(np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+                             np.sin(A1 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
+                             np.cos(A1 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+    sinusoidal_magnitude_y = A0 * \
+                             np.cos(A1 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
+                             np.sin(A1 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
     return (field_fn(points_initial) -
             np.stack((sinusoidal_magnitude_x, sinusoidal_magnitude_y), axis=-1)) ** 2
 
 
-def loss_fn(field_fn, fa_p, points, params):
-    assert fa_p is None
+def loss_fn(field_fn, points, params):
     (
         points_on_vertical,
         points_on_horizontal,
@@ -176,7 +182,7 @@ def sample_params(key):
     source_params = FLAGS.max_reynolds * jax.random.uniform(k1, shape=(1,), minval=0., maxval=1.)
 
     bc_params = FLAGS.bc_scale * jax.random.uniform(
-        k2, minval=-1.0, maxval=1.0, shape=(2,2,)
+        k2, minval=0.0, maxval=1.5, shape=(2, 2,)
     )
 
     if not FLAGS.max_holes > 0:

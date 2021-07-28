@@ -57,9 +57,11 @@ def get_ground_truth_points(
             params, resolution=resolution, boundary_points=boundary_points
         )
         k1, k2 = jax.random.split(key)
-        domain_coords = pde.sample_points_in_domain(k1, FLAGS.validation_points, params)
-        init_coords = pde.sample_points_initial(k2, FLAGS.validation_points, params)
-        fn_coords = np.concatenate([init_coords, domain_coords])
+        fn_coords = pde.sample_points_in_domain(k1, FLAGS.validation_points, params)
+        if FLAGS.pde == 'td_burgers':
+            init_coords = pde.sample_points_initial(k2, FLAGS.validation_points, params)
+            fn_coords = np.concatenate([init_coords, fn_coords])
+
         ground_truth.set_allow_extrapolation(True)
         coefs.append(np.array([ground_truth(x) for x in fn_coords]))
         coords.append(fn_coords)
@@ -122,18 +124,30 @@ def compare_plots_with_ground_truth(
         pde.plot_solution(ground_truth, params_list[i])
         if i == 0:
             plt.title("Truth", fontsize=6)
-        for j in range(inner_steps + 1):
+        for j in range(0, inner_steps + 1):
             plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
             plt.axis("off")
 
-            model, fa_p = model
             final_model = get_final_model(
-                keys[i], model, fa_p, params_list[i], j, meta_alg_def,
+                keys[i], model, params_list[i], j, meta_alg_def,
             )
 
             coords = ground_truth.function_space().tabulate_dof_coordinates()
 
-            dofs = final_model(np.array(coords))
+            # supplement time-axis for td_burgers
+            if FLAGS.pde == 'td_burgers':
+                assert coords.shape[1] == 2
+                t_list = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)
+                t_idx = npo.unique(npo.linspace(0, len(t_list), 2, endpoint=False, dtype=int)[1:])
+                t_supp = np.squeeze(t_list[t_idx])
+                print(f'plotting final model at t = {t_supp:.2f}')
+                t_supp = np.repeat(t_supp, coords.shape[0]).reshape(coords.shape[0], 1)
+
+                coords_t = np.concatenate([coords, t_supp], axis=1)
+
+                dofs = final_model(np.array(coords_t))
+            else:
+                dofs = final_model(np.array(coords))
 
             out = npo.zeros(len(coords))
 
@@ -149,8 +163,8 @@ def compare_plots_with_ground_truth(
             u_approx.vector().set_local(out)
 
             pde.plot_solution(u_approx, params_list[i])
-            if i == 0:
-                plt.title("NN Model", fontsize=6)
+            if j == 0:
+                plt.title("NN Model", fontsize=4)
 
 def plot_model_time_series(
     model,
@@ -168,11 +182,11 @@ def plot_model_time_series(
 
     params_list = jax_tools.tree_unstack(params_stacked)
 
-    for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
-        ground_truth = fenics_functions[i]
-        tmp_filenames = []
-        for t in range(FLAGS.num_tsteps):
-            plt.figure()
+    tmp_filenames = []
+    for t in range(FLAGS.num_tsteps):
+        plt.figure()
+        for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
+            ground_truth = fenics_functions[i]
             plt.subplot(inner_steps + 2, min([N, 8]), 1 + i)
             plt.axis("off")
             plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
@@ -182,14 +196,13 @@ def plot_model_time_series(
             pde.plot_solution(ground_truth[t], params_list[i])
             if i == 0:
                 plt.title("t = {:.2f} \n Truth".format(t_val), fontsize=6)
-            for j in range(inner_steps + 1):
+            for j in range(0, inner_steps + 1):
                 plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
                 plt.axis("off")
 
-                #model, fa_p = model
-                fa_p = None
+                #fa_p = None
                 final_model = get_final_model(
-                    keys[i], model, fa_p, params_list[i], j, meta_alg_def,
+                    keys[i], model, params_list[i], j, meta_alg_def,
                 )
 
                 coords = ground_truth.function_space().tabulate_dof_coordinates()
@@ -214,12 +227,12 @@ def plot_model_time_series(
                 u_approx.vector().set_local(out)
 
                 pde.plot_solution(u_approx, params_list[i])
-                if i == 0:
-                    plt.title("NN Model", fontsize=6)
-                # save fig here
-                plt.savefig('timedependent_burger_' + str(t) + '.png', dpi=400)
-                plt.close()
-                tmp_filenames.append('timedependent_burger_' + str(t) + '.png')
+                if j == 0:
+                    plt.title("NN Model", fontsize=4)
+        # save fig here
+        plt.savefig('timedependent_burger_' + str(t) + '.png', dpi=400)
+        plt.close()
+        tmp_filenames.append('timedependent_burger_' + str(t) + '.png')
         #build_gif(tmp_filenames)
     return tmp_filenames
 
@@ -252,18 +265,28 @@ def prepare_logging(out_dir, expt_name):
     return path, log, tflogger
 
 
-@partial(jax.jit, static_argnums=[1, 5])
+@partial(jax.jit, static_argnums=[4])
 def vmap_validation_error(
-    model, fa_p, ground_truth_params, points, ground_truth_vals, make_coef_func
+    model, ground_truth_params, points, ground_truth_vals, make_coef_func
 ):
     key = jax.random.PRNGKey(0)
     keys = jax.random.split(key, FLAGS.n_eval)
 
-    make_coef_func_partial = jax.jit(partial(make_coef_func, model=model, fa_p=fa_p))
-
-    coefs = vmap(make_coef_func_partial, (0, 0, 0))(
-        keys, ground_truth_params, points
+    coefs = vmap(make_coef_func, (0, None, 0, 0))(
+        keys, model, ground_truth_params, points
     )
+
+    #if type(model) == tuple and fa_p is None:
+    #    coefs = vmap(make_coef_func, (0, None, 0, 0))(
+    #        keys, model, ground_truth_params, points
+    #    )
+    #else:
+    #    make_coef_func_partial = jax.jit(partial(make_coef_func, model=model, fa_p=fa_p))
+
+    #    coefs = vmap(make_coef_func_partial, (0, 0, 0))(
+    #        keys, ground_truth_params, points
+    #    )
+
     coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
     ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
     err = coefs - ground_truth_vals
@@ -286,7 +309,7 @@ def vmap_validation_error(
         np.mean(rel_sq_err),
         np.mean(rel_sq_err, axis=(0, 1)),
         np.std(np.mean(rel_sq_err, axis=(1, 2))),
-        np.array(t_rel_sq_err)
+        np.array(t_rel_sq_err) if points.shape[-1] == 3 else None
     )
 
 

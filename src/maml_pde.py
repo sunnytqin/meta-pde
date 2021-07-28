@@ -111,7 +111,7 @@ def main(arvg):
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+    _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -215,9 +215,16 @@ def main(arvg):
                  step, subkey, optimizer, inner_lr_state)
             inner_lrs = inner_lr_get(inner_lr_state)
 
-        if step % FLAGS.val_every == 0:
+        t_list = []
+        for i in range(coords.shape[1] // FLAGS.validation_points):
+            t_idx = np.squeeze(np.arange(i * FLAGS.validation_points, (i + 1) * FLAGS.validation_points))
+            t_unique = np.unique(coords[:, t_idx, 2])
+            t_list.append(np.squeeze(t_unique))
+            assert len(t_unique) == 1
+
+        if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
-                mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = trainer_util.vmap_validation_error(
                     (optimizer.target, inner_lrs), gt_params, coords,
                     fenics_vals,
                     partial_make_coef_func)
@@ -228,11 +235,11 @@ def main(arvg):
                 (optimizer.target, inner_lrs)
             )
 
-        if step % FLAGS.log_every == 0:
+        #if step % FLAGS.log_every == 0:
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
-                "per_dim_rel_err: {}, deployment_time: {},"
+                "per_dim_rel_err: {}, per_time_step_error: {}, deployment_time: {},"
                 "meta_grad_norm: {}, time: {}, key: {}, subkey: {}".format(
                     step,
                     np.mean(meta_losses[0]),
@@ -242,6 +249,7 @@ def main(arvg):
                     rel_err_std,
                     norms,
                     per_dim_rel_err,
+                    t_rel_sq_err,
                     deployment_time,
                     meta_grad_norm,
                     t.interval,
@@ -283,6 +291,10 @@ def main(arvg):
                         "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
                     )
                     tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
+                for i in range(len(t_rel_sq_err)):
+                    tflogger.log_scalar(
+                        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
+                    )
                 for inner_step in range(FLAGS.inner_steps + 1):
                     tflogger.log_scalar(
                         "loss_step_{}".format(inner_step),
@@ -345,8 +357,21 @@ def main(arvg):
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
-    if FLAGS.expt_name is not None:
-        outfile.close()
+            if FLAGS.pde == 'td_burgers':
+                tmp_filenames = trainer_util.plot_model_time_series(
+                    (optimizer.target, inner_lrs),
+                    pde,
+                    fenics_functions,
+                    gt_params,
+                    get_final_model,
+                    maml_def,
+                    FLAGS.inner_steps,
+                )
+                gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
+                pde.build_gif(tmp_filenames, outfile=gif_out)
+
+    #if FLAGS.expt_name is not None:
+    #    outfile.close()
 
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
@@ -362,6 +387,19 @@ def main(arvg):
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
     else:
         plt.show()
+
+    if FLAGS.pde == 'td_burgers':
+        tmp_filenames = trainer_util.plot_model_time_series(
+            (optimizer.target, inner_lrs),
+            pde,
+            fenics_functions,
+            gt_params,
+            get_final_model,
+            maml_def,
+            FLAGS.inner_steps,
+        )
+        gif_out = os.path.join(path, "td_burger_final.gif".format(step))
+        pde.build_gif(tmp_filenames, outfile=gif_out)
 
 
 if __name__ == "__main__":
