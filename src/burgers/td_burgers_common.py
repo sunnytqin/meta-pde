@@ -28,13 +28,15 @@ from ..util import common_flags
 
 FLAGS = flags.FLAGS
 flags.DEFINE_float("tmin", 0.0, "PDE initial time")
-flags.DEFINE_float("tmax", 5.0, "PDE final time")
+flags.DEFINE_float("tmax", 0.5, "PDE final time")
 flags.DEFINE_integer("num_tsteps", 10, "number of time steps for td_burgers")
 flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
+flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
 FLAGS.bc_weight = 1.0
 FLAGS.max_holes = 0
-FLAGS.viz_every = int(1e5)
-FLAGS.log_every = int(1e4)
+FLAGS.viz_every = int(5e4)
+FLAGS.log_every = int(5e3)
+FLAGS.measure_grad_norm_every = int(2e3)
 FLAGS.outer_steps = int(1e8)
 FLAGS.n_eval = 5
 FLAGS.outer_points = 64
@@ -44,7 +46,7 @@ FLAGS.validation_points = 512
 class GroundTruth:
     def __init__(self, fenics_functions_list, timesteps_list):
         self.fenics_functions_list = fenics_functions_list
-        self.timesteps_list = timesteps_list
+        self.timesteps_list = np.array(timesteps_list)
         assert type(fenics_functions_list) == list
         self.fenics_function_sample = fenics_functions_list[0]
         self.tsteps = len(self.fenics_functions_list)
@@ -60,7 +62,7 @@ class GroundTruth:
         return self.tsteps
 
     def __call__(self, x):
-        # for now, we assume the time axis aligns with the PDE time stepping
+        # require time axis aligns with the PDE time stepping
         t_step = np.squeeze(np.argwhere(np.isclose(self.timesteps_list, x[2])))
         fenics_function = self.fenics_functions_list[t_step]
         return fenics_function(x[:-1])
@@ -68,7 +70,7 @@ class GroundTruth:
     def __getitem__(self, i):
         return self.fenics_functions_list[i]
 
-# new
+
 def loss_domain_fn(field_fn, points_in_domain, params):
     # ut = Re(uxx + uyy) - (u ux + v uy)
     # vt = Re(vxx + vyy) - (u vx + v vy)
@@ -125,8 +127,8 @@ def loss_horizontal_fn(field_fn, points_on_horizontal, params):
 def loss_initial_fn(field_fn, points_initial, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (bc_params[0, 0]).astype(float)
-    A1 = (bc_params[0, 1]).astype(float)
+    A0 = (np.abs(bc_params[0, 0])).astype(float)
+    A1 = (np.abs(bc_params[0, 1])).astype(float)
     sinusoidal_magnitude_x = A0 * \
                              np.sin(A1 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
                              np.cos(A1 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -136,6 +138,39 @@ def loss_initial_fn(field_fn, points_initial, params):
     return (field_fn(points_initial) -
             np.stack((sinusoidal_magnitude_x, sinusoidal_magnitude_y), axis=-1)) ** 2
 
+
+def loss_time_scale(field_fn, points_in_domain, params):
+
+    def taylor_val(x):
+        deviation = np.array([0.0, 0.0, FLAGS.time_scale_deviation])
+        # taylor expansion val
+        def filed_fn_x(points):
+            return field_fn(points).reshape(2)[0]
+
+        # compute taylor expansion for x component
+        jacobian = jax.jacfwd(filed_fn_x)
+        hessian = jax.hessian(filed_fn_x)
+        x_new = (
+            (filed_fn_x(x) + np.dot(jacobian(x), deviation) + 0.5 * np.dot(np.transpose(deviation), np.dot(hessian(x), deviation))).astype(float)
+        )
+
+        def filed_fn_y(points):
+            return field_fn(points).reshape(2)[1]
+
+        # compute taylor expansion for y component
+        jacobian = jax.jacfwd(filed_fn_y)
+        hessian = jax.hessian(filed_fn_y)
+        y_new = (
+            (filed_fn_y(x) + np.dot(jacobian(x), deviation) + 0.5 * np.dot(np.transpose(deviation), np.dot(hessian(x), deviation))).astype(float)
+        )
+        return np.array([x_new, y_new])
+
+    def model_val(x):
+        x1 = x + np.array([0.0, 0.0, FLAGS.time_scale_deviation])
+        return field_fn(x1)
+
+    # compare model value with taylor expanded val
+    return (jax.vmap(model_val)(points_in_domain) - jax.vmap(taylor_val)(points_in_domain)) ** 2
 
 def loss_fn(field_fn, points, params):
     (
@@ -152,6 +187,7 @@ def loss_fn(field_fn, points, params):
             "loss_initial": np.mean(loss_initial_fn(field_fn, points_initial, params)),
             "loss_vertical": np.mean(loss_vertical_fn(field_fn, points_on_vertical, params)),
             "loss_horizontal": np.mean(loss_horizontal_fn(field_fn, points_on_horizontal, params)),
+            #"loss_time_scale": np.mean(loss_time_scale(field_fn, points_in_domain, params)),
         },
         {
             "loss_domain": np.mean(loss_domain_fn(field_fn, points_in_domain, params)),
@@ -444,11 +480,13 @@ def sample_points_initial(key, n, params):
 
 def sample_time(key, n):
     # no randomness implemented yet
-    t = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)
-        #+ jax.random.uniform(
-        #key, minval=0.0, maxval=(FLAGS.tmax - FLAGS.tmin) / n, shape=(1, )
-    # )
-    t = np.repeat(t[1:], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding initial points
+    t = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)\
+        - jax.random.uniform(
+        key, minval=-(FLAGS.tmax - FLAGS.tmin) / n, maxval=0.0, shape=(1, )
+        )
+
+    t = np.repeat(t[:-1], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding last points
+    # t = np.repeat(t[1:], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding initial points
     return t
 
 
@@ -515,31 +553,13 @@ def plot_solution(u_list, params, t_val=None):
             n_plots = min(len(u_list), 2)
             plot_idx = npo.unique(npo.linspace(0, len(u_list), 2, endpoint=False, dtype=int)[1:])
             print(f'plotting Ground Truth at t = {u_list.timesteps_list[plot_idx]}')
-            plot_solution_snapshot(u_list[np.squeeze(plot_idx)], params)
+            plot_solution_snapshot(u_list[np.squeeze(plot_idx)])
 
     else:
-        plot_solution_snapshot(u_list, params)
+        plot_solution_snapshot(u_list)
 
 
-def plot_solution_snapshot(u, params):
-    #_, _, per_hole_params, num_holes = params
-
-    #X_, Y_ = npo.meshgrid(
-    #    npo.linspace(FLAGS.xmin, FLAGS.xmax, 18),
-    #    npo.linspace(FLAGS.ymin, FLAGS.ymax, 18),
-    #)
-    #Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
-
-    #valid_ = [is_defined([x, y], u) for x, y in zip(Xflat_, Yflat_)]
-    #Xflat_, Yflat_ = Xflat_[valid_], Yflat_[valid_]
-    #UV_ = [u(x, y) for x, y in zip(Xflat_, Yflat_)]
-
-    #U_ = npo.array([uv[0] for uv in UV_])
-    #V_ = npo.array([uv[1] for uv in UV_])
-
-    #speed_ = npo.linalg.norm(npo.stack([U_, V_], axis=1), axis=1)
-
-    #intensity = fa.inner(u, u) + 0.1
+def plot_solution_snapshot(u):
     intensity = fa.inner(u, u)
     fa.plot(intensity,
             mode="color",
@@ -547,22 +567,8 @@ def plot_solution_snapshot(u, params):
             edgecolors="k",
             linewidth=0.0,
             cmap="BuPu",
-        )
+            )
     fa.plot(u)
-
-    #plt.quiver(Xflat_, Yflat_, U_, V_, 3 * speed_)
-
-    #plt.streamplot(
-    #    X,
-    #    Y,
-    #    U,
-    #    V,
-    #    color=speed / speed.max(),
-    #    start_points=seed_points,
-    #    density=10,
-    #    linewidth=0.2,
-    #    arrowsize=0.0,
-    #)  # , np.sqrt(U**2+V**2))
 
 
 def main(argv):
@@ -570,7 +576,7 @@ def main(argv):
 
     key, subkey = jax.random.split(jax.random.PRNGKey(FLAGS.seed))
 
-    for i in range(1, 3):
+    for i in range(1, 8):
         key, sk1, sk2 = jax.random.split(key, 3)
         params = sample_params(sk1)
 
@@ -630,17 +636,11 @@ def main(argv):
 
         plt.show()
 
-
-
 if __name__ == "__main__":
-    #flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
-    #flags.DEFINE_float("tmin", 0.0, "PDE initial time")
-    #flags.DEFINE_float("tmax", 1.0, "PDE final time")
     flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
     flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
     flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
     flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-    #sflags.DEFINE_integer("num_tsteps", 2, "number of time steps for td_burgers")
     flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
     flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
 

@@ -100,8 +100,8 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     vertical_expr = fa.Expression(
         ("0.0",
          "A0*cos(A1*pi*(x[0]-xmin)/(xmax-xmin))*sin(A1*pi*(x[1]-ymin)/(ymax-ymin))"),
-        A0=float(bc_params[0, 0]),
-        A1=float(bc_params[0, 1]),
+        A0=float(np.abs(bc_params[0, 0])),
+        A1=float(np.abs(bc_params[0, 1])),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
@@ -300,12 +300,13 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    flags.DEFINE_float("xmin", 0.0, "scale on random uniform bc")
+    flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
     flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_float("ymin", 0.0, "scale on random uniform bc")
+    flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
     flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
+    flags.DEFINE_integer("max_holes", 0, "scale on random uniform bc")
     flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
+    FLAGS.ground_truth_resolution = 32
     app.run(main)
     #args = parser.parse_args()
     #args = namedtuple("ArgsTuple", vars(args))(**vars(args))

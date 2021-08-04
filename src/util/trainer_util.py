@@ -59,8 +59,15 @@ def get_ground_truth_points(
         k1, k2 = jax.random.split(key)
         fn_coords = pde.sample_points_in_domain(k1, FLAGS.validation_points, params)
         if FLAGS.pde == 'td_burgers':
-            init_coords = pde.sample_points_initial(k2, FLAGS.validation_points, params)
-            fn_coords = np.concatenate([init_coords, fn_coords])
+            # replace random time sampling with fenics val sampled time
+            fn_coords = np.concatenate([fn_coords[0: FLAGS.validation_points, :]
+                                        for _ in range(ground_truth.tsteps)])
+            time_axis = np.repeat(
+                np.array(ground_truth.timesteps_list).reshape(-1, 1),
+                FLAGS.validation_points,
+                axis=0
+            )
+            fn_coords = np.concatenate([fn_coords[:, :-1], time_axis], axis=1)
 
         ground_truth.set_allow_extrapolation(True)
         coefs.append(np.array([ground_truth(x) for x in fn_coords]))
