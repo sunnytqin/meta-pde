@@ -33,6 +33,7 @@ flags.DEFINE_integer("num_tsteps", 5, "number of time steps for td_burgers")
 flags.DEFINE_boolean("sample_time_random", True, "random time sample for NN")
 flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
+flags.DEFINE_boolean("td_burger_impose_symmetry", True, "for bc param sampling")
 FLAGS.bc_weight = 1.0
 FLAGS.max_holes = 0
 FLAGS.viz_every = int(5e4)
@@ -215,9 +216,15 @@ def sample_params(key):
 
     source_params = FLAGS.max_reynolds * jax.random.uniform(k1, shape=(1,), minval=0., maxval=1.)
 
-    bc_params = FLAGS.bc_scale * jax.random.uniform(
-        k2, minval=0.0, maxval=1.5, shape=(2, 2,)
-    )
+    if FLAGS.td_burger_impose_symmetry:
+        bc_params = FLAGS.bc_scale * jax.random.uniform(
+            k2, minval=0.0, maxval=1.5, shape=(1, 1,)
+        )
+        bc_params = np.concatenate([bc_params, np.array([[1.]])], axis=1)
+    else:
+        bc_params = FLAGS.bc_scale * jax.random.uniform(
+            k2, minval=0.0, maxval=1.5, shape=(1, 2,)
+        )
 
     if not FLAGS.max_holes > 0:
         n_holes = 0
