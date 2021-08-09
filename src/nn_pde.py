@@ -350,6 +350,15 @@ def main(argv):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
+    t_list = []
+    for i in range(FLAGS.num_tsteps):
+        tile_idx = coords.shape[1] // FLAGS.num_tsteps
+        t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+        t_unique = np.unique(coords[:, t_idx, 2])
+        t_list.append(np.squeeze(t_unique))
+        assert len(t_unique) == 1
+    print('Extracted t-list:', t_list)
+
     if FLAGS.pde == 'pressurefree_stokes':
         assert len(fenics_functions) == 1
         key, subkey = jax.random.split(key)
@@ -405,7 +414,8 @@ def main(argv):
                 _points = pde.sample_points(_k2, FLAGS.outer_points, _params)
                 plt.figure()
                 for _pointsi in _points:
-                    plt.scatter(_pointsi[:, 0], _pointsi[:, 1])
+                    plt.scatter(_pointsi[:, 0], _pointsi[:, 1], label=f'n_points={_pointsi.shape[0]}')
+                    plt.legend()
                 tflogger.log_plots("Points", [plt.gcf()], step)
                 _all_points = np.concatenate(_points)
                 _vals = optimizer.target(_all_points)
@@ -472,12 +482,25 @@ def main(argv):
                         "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
 
-        t_list = []
-        for i in range(coords.shape[1] // FLAGS.validation_points):
-            t_idx = np.squeeze(np.arange(i * FLAGS.validation_points, (i + 1) * FLAGS.validation_points))
-            t_unique = np.unique(coords[:, t_idx, 2])
-            t_list.append(np.squeeze(t_unique))
-            assert len(t_unique) == 1
+                    t_rel_sq_err = []
+                    tile_idx = coords.shape[1] // FLAGS.num_tsteps
+                    for i in range(FLAGS.num_tsteps):
+                        t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
+                        t_err = np.abs(fenics_vals[0][t_idx, dim] -
+                                 _outputs_on_coords[t_idx, dim])
+
+                        t_rel_sq_err.append(
+                            np.mean(t_err / np.abs(fenics_vals[0][t_idx, dim]))
+                        )
+
+                    plt.figure()
+                    plt.plot(t_list, t_rel_sq_err, '.')
+                    plt.xlabel('t')
+                    plt.ylabel('rel err')
+                    tflogger.log_plots(
+                        "Relative error on dim {}".format(dim), [plt.gcf()], step
+                    )
+
 
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:

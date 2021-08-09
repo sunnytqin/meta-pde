@@ -29,7 +29,8 @@ from ..util import common_flags
 FLAGS = flags.FLAGS
 flags.DEFINE_float("tmin", 0.0, "PDE initial time")
 flags.DEFINE_float("tmax", 0.5, "PDE final time")
-flags.DEFINE_integer("num_tsteps", 10, "number of time steps for td_burgers")
+flags.DEFINE_integer("num_tsteps", 5, "number of time steps for td_burgers")
+flags.DEFINE_boolean("sample_time_random", True, "random time sample for NN")
 flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
 FLAGS.bc_weight = 1.0
@@ -39,9 +40,6 @@ FLAGS.log_every = int(5e3)
 FLAGS.measure_grad_norm_every = int(2e3)
 FLAGS.outer_steps = int(1e8)
 FLAGS.n_eval = 5
-FLAGS.outer_points = 64
-FLAGS.inner_points = 64
-FLAGS.validation_points = 512
 
 class GroundTruth:
     def __init__(self, fenics_functions_list, timesteps_list):
@@ -292,7 +290,7 @@ def is_in_hole(xy, pore_params, tol=1e-7):
 def sample_points(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2, k3, k4, k5 = jax.random.split(key, 5)
-    n_on_walls = n // 6
+    n_on_walls = n
     n_on_holes = n // 2 - n_on_walls #- n_on_inlet - n_on_outlet
     points_on_vertical = sample_points_on_vertical(k1, n_on_walls, params)
     points_on_horizontal = sample_points_on_horizontal(k2, n_on_walls, params)
@@ -316,12 +314,13 @@ def sample_points(key, n, params):
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_on_vertical(key, n, params):
     k1, k2 = jax.random.split(key)
-    n = n // 2
+    n_scaled = n // (FLAGS.num_tsteps - 1)
+    n_scaled = n_scaled // 2
     _, _, per_hole_params, n_holes = params
-    y = (np.linspace(FLAGS.ymin, FLAGS.ymax, n, endpoint=False) + jax.random.uniform(
-        k1, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / n, shape=(1,)
-    )).reshape(n, 1)
-    t = sample_time(k2, n)
+    y = (np.linspace(FLAGS.ymin, FLAGS.ymax, n_scaled, endpoint=False) + jax.random.uniform(
+        k1, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / n_scaled, shape=(1,)
+    )).reshape(n_scaled, 1)
+    t = sample_time(k2, n_scaled)
     y = np.tile(y, (FLAGS.num_tsteps - 1, 1))
     lhs_x = (FLAGS.xmin * np.ones(len(t))).reshape(-1, 1)
     rhs_x = (FLAGS.xmax * np.ones(len(t))).reshape(-1, 1)
@@ -422,7 +421,7 @@ def sample_points_on_pores(key, n, params):
     t = sample_time(k3, n)
 
     tmp = np.tile(tmp, (len(t) // len(tmp), 1))
-    xy_t = np.concatenate([tmp, t], axis =1)
+    xy_t = np.concatenate([tmp, t], axis=1)
 
     return xy_t
 
@@ -433,10 +432,12 @@ def sample_points_in_domain(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2, k3 = jax.random.split(key, 3)
     ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
+    # rescale n according to time steps
+    n_scaled = n // (FLAGS.num_tsteps - 1)
     # total number of points is 2 * n
     # so as long as the fraction of volume covered is << 1/2 we are ok
-    n_x = npo.int32(npo.sqrt(2) * npo.sqrt(n) * npo.sqrt(ratio))
-    n_y = npo.int32(npo.sqrt(2) * npo.sqrt(n) / npo.sqrt(ratio))
+    n_x = npo.int32(npo.sqrt(2) * npo.sqrt(n_scaled) * npo.sqrt(ratio))
+    n_y = npo.int32(npo.sqrt(2) * npo.sqrt(n_scaled) / npo.sqrt(ratio))
     dx = (FLAGS.xmax - FLAGS.xmin) / n_x
     dy = (FLAGS.ymax - FLAGS.ymin) / n_y
 
@@ -460,33 +461,37 @@ def sample_points_in_domain(key, n, params):
     in_hole = in_hole * mask
     in_hole = np.any(in_hole, axis=1)
 
-    idxs = jax.random.choice(k2, xy.shape[0], replace=False, p=1 - in_hole, shape=(n,))
+    idxs = jax.random.choice(k2, xy.shape[0], replace=False, p=1 - in_hole, shape=(n_scaled,))
     xy = np.array(xy[idxs])
 
-    t = sample_time(k3, n)
+    t = sample_time(k3, n_scaled)
 
     xy = np.tile(xy, (len(t) // len(xy), 1))
     xy_t = np.concatenate([xy, t], axis=1)
+
+    assert len(xy_t) == n_scaled * (FLAGS.num_tsteps - 1)
 
     return xy_t
 
 
 # new
 def sample_points_initial(key, n, params):
-    points_in_domain = sample_points_in_domain(key, n, params)
-    t = np.zeros((n * (FLAGS.num_tsteps - 1), 1))
+    points_in_domain = sample_points_in_domain(key, n * (FLAGS.num_tsteps - 1), params)[0: n, :]
+    t = np.zeros((points_in_domain.shape[0], 1))
     return np.concatenate([points_in_domain[:, :-1], t], axis=1)
 
 
 def sample_time(key, n):
-    # no randomness implemented yet
-    t = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)\
-        - jax.random.uniform(
-        key, minval=-(FLAGS.tmax - FLAGS.tmin) / n, maxval=0.0, shape=(1, )
-        )
+    if FLAGS.sample_time_random:
+        t = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)\
+            - jax.random.uniform(
+            key, minval=-(FLAGS.tmax - FLAGS.tmin) / n, maxval=0.0, shape=(1, )
+            )
 
-    t = np.repeat(t[:-1], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding last points
-    # t = np.repeat(t[1:], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding initial points
+        t = np.repeat(t[:-1], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding last points
+    else:
+        t = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)
+        t = np.repeat(t[1:], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding initial points
     return t
 
 

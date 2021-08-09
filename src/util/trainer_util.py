@@ -60,11 +60,15 @@ def get_ground_truth_points(
         fn_coords = pde.sample_points_in_domain(k1, FLAGS.validation_points, params)
         if FLAGS.pde == 'td_burgers':
             # replace random time sampling with fenics val sampled time
-            fn_coords = np.concatenate([fn_coords[0: FLAGS.validation_points, :]
+            tile_idx = FLAGS.validation_points // (FLAGS.num_tsteps - 1)
+            assert (fn_coords[0: tile_idx, 0: -1] ==
+                    fn_coords[tile_idx: 2 * tile_idx, 0: -1]).all()
+            assert FLAGS.num_tsteps == ground_truth.tsteps
+            fn_coords = np.concatenate([fn_coords[0: tile_idx, :]
                                         for _ in range(ground_truth.tsteps)])
             time_axis = np.repeat(
                 np.array(ground_truth.timesteps_list).reshape(-1, 1),
-                FLAGS.validation_points,
+                tile_idx,
                 axis=0
             )
             fn_coords = np.concatenate([fn_coords[:, :-1], time_axis], axis=1)
@@ -302,10 +306,12 @@ def vmap_validation_error(
     rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
 
     # if contains time dimension, add per time-stepping validation error
-    if points.shape[-1] == 3:
+    if FLAGS.pde == 'td_burgers':
+        assert points.shape[-1] == 3
         t_rel_sq_err = []
-        for i in range(coefs.shape[1] // FLAGS.validation_points):
-            t_idx = np.squeeze(np.arange(i * FLAGS.validation_points, (i + 1) * FLAGS.validation_points))
+        tile_idx = points.shape[1] // FLAGS.num_tsteps
+        for i in range(FLAGS.num_tsteps):
+            t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
             t_err = err[:, t_idx, :]
             t_normalizer = np.mean(ground_truth_vals[:, t_idx, :] ** 2, axis=1, keepdims=True)
             t_rel_sq_err.append(np.mean(t_err ** 2 / t_normalizer.mean(axis=2, keepdims=True)))
@@ -316,7 +322,7 @@ def vmap_validation_error(
         np.mean(rel_sq_err),
         np.mean(rel_sq_err, axis=(0, 1)),
         np.std(np.mean(rel_sq_err, axis=(1, 2))),
-        np.array(t_rel_sq_err) if points.shape[-1] == 3 else None
+        np.array(t_rel_sq_err) if FLAGS.pde == 'td_burgers' else None
     )
 
 
