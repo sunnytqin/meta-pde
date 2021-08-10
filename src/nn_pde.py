@@ -26,12 +26,11 @@ from .util import jax_tools
 import time
 
 import matplotlib.pyplot as plt
-from collections import defaultdict
+from collections import deque
 import pdb
 import sys
 import os
-from copy import deepcopy
-from collections import namedtuple
+import logging
 
 from .util import common_flags
 
@@ -317,7 +316,7 @@ def main(argv):
                 lambda x, y: x + y,
                 jax.tree_util.tree_map(lambda x: np.sum(x ** 2), batch_grad),
             )
-                    )
+        )
 
         batch_grad = jax.lax.cond(
             grad_norm > FLAGS.grad_clip,
@@ -350,6 +349,11 @@ def main(argv):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
+    FLAGS.tmax_nn = 1e-4
+    early_stopping_tracker = deque()
+    propagate_time = False
+    last_prop_step = 0
+
     t_list = []
     for i in range(FLAGS.num_tsteps):
         tile_idx = coords.shape[1] // FLAGS.num_tsteps
@@ -357,7 +361,6 @@ def main(argv):
         t_unique = np.unique(coords[:, t_idx, 2])
         t_list.append(np.squeeze(t_unique))
         assert len(t_unique) == 1
-    print('Extracted t-list:', t_list)
 
     if FLAGS.pde == 'pressurefree_stokes':
         assert len(fenics_functions) == 1
@@ -376,11 +379,20 @@ def main(argv):
     # --------------------- Run MAML --------------------
 
     time_last_log = time.time()
-
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
             optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, bc_weights)
+
+        # increase NN domain every 100k steps or when we stop seeing val loss improvement
+        if propagate_time:
+            FLAGS.tmax_nn += (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
+            FLAGS.tmax_nn = np.clip(FLAGS.tmax_nn, a_max=FLAGS.tmax).astype(float)
+            log(f"Passing new t max to NN: {FLAGS.tmax_nn}")
+            logging.info(f"Passing new t max to NN: {FLAGS.tmax_nn}")
+            last_prop_step = step
+            sys.stdout.flush()
+
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
         # points; plotting the losses at those points.
@@ -395,7 +407,7 @@ def main(argv):
                                         for k, v in loss_vals_and_grad_norms.items()}
             log("loss vals and grad norms: ", loss_vals_and_grad_norms)
             if FLAGS.annealing:
-                bc_weights = {k: float(v)for k, v in bc_weights.items()}
+                bc_weights = {k: float(v) for k, v in bc_weights.items()}
                 log("bc weigths for annealing: ", bc_weights)
                 if step > 0:
                     assert(bc_weights != None )
@@ -453,6 +465,7 @@ def main(argv):
                         "Outputs dim {}".format(dim), [plt.gcf()], step
                     )
                 _outputs_on_coords = optimizer.target(coords[0])
+
                 for dim in range(_vals.shape[1]):
                     plt.figure()
                     clrs = plt.scatter(
@@ -482,24 +495,25 @@ def main(argv):
                         "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
 
-                    t_rel_sq_err = []
-                    tile_idx = coords.shape[1] // FLAGS.num_tsteps
-                    for i in range(FLAGS.num_tsteps):
-                        t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
-                        t_err = np.abs(fenics_vals[0][t_idx, dim] -
-                                 _outputs_on_coords[t_idx, dim])
+                t_rel_sq_err = []
+                tile_idx = coords.shape[1] // FLAGS.num_tsteps
+                for i in range(FLAGS.num_tsteps):
+                    t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
+                    t_err = np.abs(fenics_vals[0][t_idx, :] -
+                             _outputs_on_coords[t_idx, :])
+                    t_normalizer = np.mean(fenics_vals[0][t_idx, :] ** 2, axis=1, keepdims=True)
 
-                        t_rel_sq_err.append(
-                            np.mean(t_err / np.abs(fenics_vals[0][t_idx, dim]))
-                        )
-
-                    plt.figure()
-                    plt.plot(t_list, t_rel_sq_err, '.')
-                    plt.xlabel('t')
-                    plt.ylabel('rel err')
-                    tflogger.log_plots(
-                        "Relative error on dim {}".format(dim), [plt.gcf()], step
+                    t_rel_sq_err.append(
+                        np.mean(t_err ** 2 / t_normalizer)
                     )
+
+                plt.figure()
+                plt.plot(t_list, t_rel_sq_err, '.')
+                plt.xlabel('t')
+                plt.ylabel('rel err')
+                tflogger.log_plots(
+                    "Relative error on dim {}".format(dim), [plt.gcf()], step
+                )
 
 
         if step % FLAGS.log_every == 0:
@@ -511,6 +525,15 @@ def main(argv):
             deployment_time = deploy_timer.interval / FLAGS.n_eval
 
             val_loss = validation_losses(optimizer.target)
+
+            if len(early_stopping_tracker) == 3:
+                improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
+                _ = early_stopping_tracker.popleft()
+                if improve_pct < FLAGS.propagatetime_rel:
+                    propagate_time = True
+                elif (step - last_prop_step) >= FLAGS.propagatetime_max:
+                    propagate_time = True
+            early_stopping_tracker.append(val_loss)
 
         # if step % FLAGS.log_every == 0:
             if step > 0:
@@ -564,6 +587,8 @@ def main(argv):
                 for k in loss_aux:
                     tflogger.log_scalar("meta_" + k, float(np.mean(loss_aux[k])), step)
 
+                tflogger.log_scalar("NN_tmax", float(FLAGS.tmax_nn), step)
+
                 if step % FLAGS.viz_every == 0:
                     # These take lots of filesize so only do them sometimes
 
@@ -571,6 +596,7 @@ def main(argv):
                         tflogger.log_histogram("Param: " + k, v.flatten(), step)
                         if 'scale' in k:
                             print("Scale params: {}: {}".format(k, v))
+
 
             log("time for logging {}".format(time.time() - time_last_log))
             time_last_log = time.time()

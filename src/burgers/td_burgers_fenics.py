@@ -154,7 +154,7 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     dt = (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
 
     lhs_term = fa.dot(u, v) + \
-               reynolds * dt * fa.inner(fa.grad(u), fa.grad(v)) - \
+               reynolds * dt * fa.inner(fa.grad(u), fa.grad(v)) + \
                dt * fa.inner(fa.grad(u) * u, v)
 
     # [ u0xx + u0yy

@@ -29,11 +29,14 @@ from ..util import common_flags
 FLAGS = flags.FLAGS
 flags.DEFINE_float("tmin", 0.0, "PDE initial time")
 flags.DEFINE_float("tmax", 0.5, "PDE final time")
+flags.DEFINE_float("tmax_nn", -1., "PDE final time passed in for NN")
 flags.DEFINE_integer("num_tsteps", 5, "number of time steps for td_burgers")
 flags.DEFINE_boolean("sample_time_random", True, "random time sample for NN")
 flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
 flags.DEFINE_boolean("td_burger_impose_symmetry", True, "for bc param sampling")
+flags.DEFINE_integer("propagatetime_max", 100_000, "maximum iterations before propagate time step")
+flags.DEFINE_float("propagatetime_rel", 0.1, "rel val improvment change before propagate time step")
 FLAGS.bc_weight = 1.0
 FLAGS.max_holes = 0
 FLAGS.viz_every = int(5e4)
@@ -489,15 +492,19 @@ def sample_points_initial(key, n, params):
 
 
 def sample_time(key, n):
+    tmax = jax.lax.cond(FLAGS.tmax_nn > 0,
+                        lambda _: FLAGS.tmax_nn,
+                        lambda _: FLAGS.tmax,
+                        operand=None)
     if FLAGS.sample_time_random:
-        t = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)\
+        t = np.linspace(FLAGS.tmin, tmax, FLAGS.num_tsteps, endpoint=False)\
             - jax.random.uniform(
-            key, minval=-(FLAGS.tmax - FLAGS.tmin) / n, maxval=0.0, shape=(1, )
+            key, minval=-(tmax - FLAGS.tmin) / n, maxval=0.0, shape=(1, )
             )
 
         t = np.repeat(t[:-1], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding last points
     else:
-        t = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)
+        t = np.linspace(FLAGS.tmin, tmax, FLAGS.num_tsteps, endpoint=False)
         t = np.repeat(t[1:], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding initial points
     return t
 
