@@ -35,8 +35,8 @@ flags.DEFINE_boolean("sample_time_random", True, "random time sample for NN")
 flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
 flags.DEFINE_boolean("td_burger_impose_symmetry", True, "for bc param sampling")
-flags.DEFINE_integer("propagatetime_max", 100_000, "maximum iterations before propagate time step")
-flags.DEFINE_float("propagatetime_rel", 0.1, "rel val improvment change before propagate time step")
+flags.DEFINE_integer("propagatetime_max", 200_000, "maximum iterations before propagate time step")
+flags.DEFINE_float("propagatetime_rel", 0.01, "rel val improvment change before propagate time step")
 FLAGS.bc_weight = 1.0
 FLAGS.max_holes = 0
 FLAGS.viz_every = int(5e4)

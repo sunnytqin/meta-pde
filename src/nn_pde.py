@@ -385,7 +385,7 @@ def main(argv):
             optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, bc_weights)
 
         # increase NN domain every 100k steps or when we stop seeing val loss improvement
-        if propagate_time:
+        if (propagate_time) and (FLAGS.tmax_nn < FLAGS.tmax):
             FLAGS.tmax_nn += (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
             FLAGS.tmax_nn = np.clip(FLAGS.tmax_nn, a_max=FLAGS.tmax).astype(float)
             log(f"Passing new t max to NN: {FLAGS.tmax_nn}")
