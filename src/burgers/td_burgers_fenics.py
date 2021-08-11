@@ -99,9 +99,10 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     # Define function for setting Dirichlet values
     vertical_expr = fa.Expression(
         ("0.0",
-         "A0*cos(A1*pi*(x[0]-xmin)/(xmax-xmin))*sin(A1*pi*(x[1]-ymin)/(ymax-ymin))"),
+         "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
         A0=float(np.abs(bc_params[0, 0])),
         A1=float(np.abs(bc_params[0, 1])),
+        A2=float(np.abs(bc_params[0, 2])),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
@@ -110,10 +111,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     )
 
     horizontal_expr = fa.Expression(
-        ("A0*sin(A1*pi*(x[0]-xmin)/(xmax-xmin))*cos(A1*pi*(x[1]-ymin)/(ymax-ymin))",
+        ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
          "0.0"),
         A0=float(np.abs(bc_params[0, 0])),
         A1=float(np.abs(bc_params[0, 1])),
+        A2=float(np.abs(bc_params[0, 2])),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
@@ -124,10 +126,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     non_slip = fa.Constant((0.0, 0.0))
 
     u_D = fa.Expression(
-        ("A0*sin(A1*pi*(x[0]-xmin)/(xmax-xmin))*cos(A1*pi*(x[1]-ymin)/(ymax-ymin))",
-         "A0*cos(A1*pi*(x[0]-xmin)/(xmax-xmin))*sin(A1*pi*(x[1]-ymin)/(ymax-ymin))"),
+        ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
+         "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
         A0=float(np.abs(bc_params[0, 0])),
         A1=float(np.abs(bc_params[0, 1])),
+        A2=float(np.abs(bc_params[0, 2])),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,

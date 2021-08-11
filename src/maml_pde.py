@@ -55,6 +55,7 @@ flags.DEFINE_float("inner_grad_clip", 1e14, "inner grad clipping")
 
 flags.DEFINE_float("outer_loss_decay", 0.1, "0. = just take final loss. 1.=sum all")
 
+FLAGS.td_burger_impose_symmetry = False
 
 def main(arvg):
     if FLAGS.out_dir is None:
@@ -203,6 +204,14 @@ def main(arvg):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
+    t_list = []
+    for i in range(FLAGS.num_tsteps):
+        tile_idx = coords.shape[1] // FLAGS.num_tsteps
+        t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+        t_unique = np.unique(coords[:, t_idx, 2])
+        t_list.append(np.squeeze(t_unique))
+        assert len(t_unique) == 1
+
     time_last_log = time.time()
     # --------------------- Run MAML --------------------
 
@@ -215,12 +224,6 @@ def main(arvg):
                  step, subkey, optimizer, inner_lr_state)
             inner_lrs = inner_lr_get(inner_lr_state)
 
-        t_list = []
-        for i in range(coords.shape[1] // FLAGS.validation_points):
-            t_idx = np.squeeze(np.arange(i * FLAGS.validation_points, (i + 1) * FLAGS.validation_points))
-            t_unique = np.unique(coords[:, t_idx, 2])
-            t_list.append(np.squeeze(t_unique))
-            assert len(t_unique) == 1
 
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
@@ -291,10 +294,20 @@ def main(arvg):
                         "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
                     )
                     tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
-                for i in range(len(t_rel_sq_err)):
-                    tflogger.log_scalar(
-                        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
-                    )
+
+                plt.figure()
+                plt.plot(t_list, t_rel_sq_err, '.')
+                plt.xlabel('t')
+                plt.ylabel('val rel err')
+                tflogger.log_plots(
+                    "Per time step relative error", [plt.gcf()], step
+                )
+
+                #for i in range(len(t_rel_sq_err)):
+                #    tflogger.log_scalar(
+                #        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
+                #    )
+
                 for inner_step in range(FLAGS.inner_steps + 1):
                     tflogger.log_scalar(
                         "loss_step_{}".format(inner_step),

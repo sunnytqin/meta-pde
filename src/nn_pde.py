@@ -391,6 +391,7 @@ def main(argv):
             log(f"Passing new t max to NN: {FLAGS.tmax_nn}")
             logging.info(f"Passing new t max to NN: {FLAGS.tmax_nn}")
             last_prop_step = step
+            propagate_time = False
             sys.stdout.flush()
 
         # ---- This big section is logging a bunch of debug stats
@@ -495,25 +496,6 @@ def main(argv):
                         "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
 
-                t_rel_sq_err = []
-                tile_idx = coords.shape[1] // FLAGS.num_tsteps
-                for i in range(FLAGS.num_tsteps):
-                    t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
-                    t_err = np.abs(fenics_vals[0][t_idx, :] -
-                             _outputs_on_coords[t_idx, :])
-                    t_normalizer = np.mean(fenics_vals[0][t_idx, :] ** 2, axis=1, keepdims=True)
-
-                    t_rel_sq_err.append(
-                        np.mean(t_err ** 2 / t_normalizer)
-                    )
-
-                plt.figure()
-                plt.plot(t_list, t_rel_sq_err, '.')
-                plt.xlabel('t')
-                plt.ylabel('rel err')
-                tflogger.log_plots(
-                    "Relative error on dim {}".format(dim), [plt.gcf()], step
-                )
 
 
         if step % FLAGS.log_every == 0:
@@ -571,10 +553,18 @@ def main(argv):
 
                 tflogger.log_scalar("val_mse", float(mse), step)
 
-                for i in range(len(t_rel_sq_err)):
-                    tflogger.log_scalar(
-                        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
-                    )
+                plt.figure()
+                plt.plot(t_list, t_rel_sq_err, '.')
+                plt.xlabel('t')
+                plt.ylabel('val rel err')
+                tflogger.log_plots(
+                    "Per time step relative error", [plt.gcf()], step
+                )
+
+                #for i in range(len(t_rel_sq_err)):
+                #    tflogger.log_scalar(
+                #        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
+                #    )
 
                 for i in range(len(per_dim_rel_err)):
                     tflogger.log_scalar(

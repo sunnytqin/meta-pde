@@ -36,7 +36,7 @@ flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
 flags.DEFINE_boolean("td_burger_impose_symmetry", True, "for bc param sampling")
 flags.DEFINE_integer("propagatetime_max", 200_000, "maximum iterations before propagate time step")
-flags.DEFINE_float("propagatetime_rel", 0.01, "rel val improvment change before propagate time step")
+flags.DEFINE_float("propagatetime_rel", 0.05, "rel val improvment change before propagate time step")
 FLAGS.bc_weight = 1.0
 FLAGS.max_holes = 0
 FLAGS.viz_every = int(5e4)
@@ -105,9 +105,10 @@ def loss_vertical_fn(field_fn, points_on_vertical, params):
 
     A0 = (np.abs(bc_params[0, 0])).astype(float)
     A1 = (np.abs(bc_params[0, 1])).astype(float)
-    sinusoidal_magnitude = A0 * \
-                           np.cos(A1 * np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) *\
-                           np.sin(A1 * np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+    A2 = (np.abs(bc_params[0, 2])).astype(float)
+    sinusoidal_magnitude = A1 * \
+                           np.cos(A2 * np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) *\
+                           np.sin(A2 * np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
     zero_magnitude = np.zeros_like(sinusoidal_magnitude)
 
     return (field_fn(points_on_vertical) - np.stack((zero_magnitude, sinusoidal_magnitude), axis=-1)) ** 2
@@ -118,9 +119,10 @@ def loss_horizontal_fn(field_fn, points_on_horizontal, params):
 
     A0 = (np.abs(bc_params[0, 0])).astype(float)
     A1 = (np.abs(bc_params[0, 1])).astype(float)
+    A2 = (np.abs(bc_params[0, 2])).astype(float)
     sinusoidal_magnitude = A0 * \
-                           np.sin(A1 * np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                           np.cos(A1 * np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+                           np.sin(A2 * np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
+                           np.cos(A2 * np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
     zero_magnitude = np.zeros_like(sinusoidal_magnitude)
 
     return (field_fn(points_on_horizontal) - np.stack((sinusoidal_magnitude, zero_magnitude), axis=-1)) ** 2
@@ -131,12 +133,13 @@ def loss_initial_fn(field_fn, points_initial, params):
 
     A0 = (np.abs(bc_params[0, 0])).astype(float)
     A1 = (np.abs(bc_params[0, 1])).astype(float)
+    A2 = (np.abs(bc_params[0, 2])).astype(float)
     sinusoidal_magnitude_x = A0 * \
-                             np.sin(A1 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.cos(A1 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    sinusoidal_magnitude_y = A0 * \
-                             np.cos(A1 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.sin(A1 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+                             np.sin(A2 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
+                             np.cos(A2 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
+    sinusoidal_magnitude_y = A1 * \
+                             np.cos(A2 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
+                             np.sin(A2 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
     return (field_fn(points_initial) -
             np.stack((sinusoidal_magnitude_x, sinusoidal_magnitude_y), axis=-1)) ** 2
 
@@ -223,10 +226,10 @@ def sample_params(key):
         bc_params = FLAGS.bc_scale * jax.random.uniform(
             k2, minval=0.0, maxval=1.5, shape=(1, 1,)
         )
-        bc_params = np.concatenate([bc_params, np.array([[1.]])], axis=1)
+        bc_params = np.concatenate([bc_params, bc_params, np.array([[1.]])], axis=1)
     else:
         bc_params = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=0.0, maxval=1.5, shape=(1, 2,)
+            k2, minval=0.0, maxval=1.5, shape=(1, 3,)
         )
 
     if not FLAGS.max_holes > 0:
