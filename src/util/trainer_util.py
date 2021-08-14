@@ -3,7 +3,7 @@
 Consider moving these into subfolders.
 
 Also try move more functions in here."""
-
+import pickle
 
 import jax
 import jax.numpy as np
@@ -21,6 +21,7 @@ from adahessianJax.flaxOptimizer import Adahessian
 from functools import partial
 
 import fenics as fa
+import dolfin
 import imageio
 
 from . import jax_tools
@@ -79,6 +80,89 @@ def get_ground_truth_points(
         ground_truth.set_allow_extrapolation(False)
         fenics_functions.append(ground_truth)
     return fenics_functions, np.stack(coefs, axis=0), np.stack(coords, axis=0)
+
+
+def save_fenics_solution(cache, fenics_function):
+    """
+    Args:
+        cache: dictionary
+        fenics_function: fenics solution or ground truths
+    """
+    pde = cache['pde']
+    out_dir = f"{pde}_fenics_solutions"
+    if not os.path.exists(out_dir):
+        os.mkdir(out_dir)
+
+    suffix = len(os.listdir(out_dir))
+    path = os.path.join(out_dir, str(suffix))
+    assert not os.path.exists(path)
+    if not os.path.exists(os.path.join(out_dir, "master_info.pickle")):
+        master_info = {
+            str(suffix): (cache['hparams'], cache["params"])
+        }
+        with open(os.path.join(out_dir, "master_info.pickle"), 'wb') as handle:
+            pickle.dump(master_info, handle)
+    else:
+        with open(os.path.join(out_dir, "master_info.pickle"), 'rb') as handle:
+            master_info = pickle.load(handle)
+        master_info[str(suffix)] = \
+            (cache['hparams'], cache["params"])
+
+        with open(os.path.join(out_dir, "master_info.pickle"), 'wb') as handle:
+            pickle.dump(master_info, handle)
+
+    os.mkdir(path)
+
+    if type(fenics_function) == dolfin.function.function.Function:
+        assert pde != 'td_burgers'
+        with dolfin.cpp.io.XDMFFile(os.path.join(path, f'pde')) as f:
+            f.write_checkpoint(fenics_function, f"{cache['pde']}")
+    else:
+        assert pde == 'td_burgers'
+        for i, fenics_function_t in enumerate(fenics_function):
+            with dolfin.cpp.io.XDMFFile(os.path.join(path, f'pde_{i}')) as f:
+                f.write_checkpoint(fenics_function_t, f"{pde}_{i}")
+
+    return path
+
+
+def read_fenics_solution(cache, fenics_function):
+    """
+    Args:
+        cache: dictionary
+        fenics_function: place holder for the fenics solution
+    """
+    pde = cache['pde']
+    out_dir = f"{pde}_fenics_solutions"
+    if not os.path.exists(out_dir):
+        return False
+    else:
+        with open(os.path.join(out_dir, "master_info.pickle"), 'rb') as handle:
+            master_info = pickle.load(handle)
+        suffix = None
+        for suffix_i, cache_i in master_info.items():
+            if (
+                    np.isclose(cache_i[0], cache['hparams']).all() and
+                    np.array([np.isclose(a, b).all() for a, b in zip(cache_i[1], cache['params'])]).all()
+            ):
+                suffix = suffix_i
+                break
+
+        if (suffix is not None) and (type(fenics_function) == list):
+            path = os.path.join(out_dir, suffix)
+            for i in range(len(fenics_function)):
+                with dolfin.cpp.io.XDMFFile(os.path.join(path, f'pde_{i}')) as handle:
+                    handle.read_checkpoint(fenics_function[i], f"{cache['pde']}_{i}")
+            return True
+
+        elif (suffix is not None) and (type(fenics_function) == dolfin.function.function.Function):
+            path = os.path.join(out_dir, suffix)
+            with dolfin.cpp.io.XDMFFile(os.path.join(path, f'pde')) as handle:
+                handle.read_checkpoint(fenics_function, f"{cache['pde']}")
+            return True
+
+        else:
+            return False
 
 
 def extract_coefs_by_dim(function_space, dofs, out, dim_idx=0):

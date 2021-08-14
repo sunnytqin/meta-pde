@@ -511,7 +511,7 @@ def main(argv):
             if len(early_stopping_tracker) == 3:
                 improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
                 _ = early_stopping_tracker.popleft()
-                if improve_pct < FLAGS.propagatetime_rel:
+                if (improve_pct < FLAGS.propagatetime_rel) and (step - last_prop_step) >= (FLAGS.propagatetime_max // 2):
                     propagate_time = True
                 elif (step - last_prop_step) >= FLAGS.propagatetime_max:
                     propagate_time = True

@@ -18,6 +18,7 @@ import imageio
 from absl import app
 from absl import flags
 from ..util import common_flags
+from ..util.trainer_util import read_fenics_solution, save_fenics_solution
 
 FLAGS = flags.FLAGS
 
@@ -61,7 +62,7 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     )
     source_params, bc_params, per_hole_params, n_holes = params
     # pdb.set_trace()
-
+    dt = (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
 
     holes = [
         make_domain(c1, c2, boundary_points, x0, y0, size)
@@ -95,6 +96,26 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     u = fa.Function(V)
     v = fa.TestFunction(V)
     du = fa.TrialFunction(V)
+
+    # generate cache data
+    cache = {
+        "hparams": (resolution,
+                    FLAGS.xmin, FLAGS.xmax,
+                    FLAGS.ymin, FLAGS.ymax,
+                    FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps,
+                    ),
+        "params": params,
+        "pde": "td_burgers"
+    }
+    # check if PDE has already been solved
+    u_list = []
+    t_list = []
+    for n in range(FLAGS.num_tsteps):
+        u_list.append(u.copy(deepcopy=True))
+        t_list.append(FLAGS.tmin + dt * n)
+    solved = read_fenics_solution(cache, u_list)
+    if solved:
+        return GroundTruth(u_list, np.array(t_list))
 
     # Define function for setting Dirichlet values
     vertical_expr = fa.Expression(
@@ -142,14 +163,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     bc_horizontal = fa.DirichletBC(V, horizontal_expr, horizontal_walls)
     #bc_nonslip = fa.DirichletBC(V, non_slip, non_slip_walls)
 
-
     # Define variational problem
     u.vector().set_local(np.random.randn(len(u.vector())) * 1e-6)
 
-
     #     [ux   uy  ] [u   = [u ux + vuy
     #      vx   vy     v]     u vx + v vy]
-
 
     # (u ux - uxx)  +  (v uy - uyy)
     reynolds = float(1 / source_params[0])
@@ -167,7 +185,6 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     #  u0yy * v0 -> u0y * v0y
 
     rhs_term = fa.dot(u_n, v)
-
 
     F = (
         lhs_term * fa.dx - rhs_term * fa.dx
@@ -218,12 +235,14 @@ def solve_fenics(params, boundary_points=24, resolution=16):
                 )
         fa.plot(u)
         plt.title('Ground Truth \n t = {:.2f}'.format(t_list[n]))
-        plt.savefig('timedependent_burger_' + str(n))
+        plt.savefig('td_burger_' + str(n))
         plt.close()
-        tmp_filenames.append('timedependent_burger_' + str(n) + '.png')
-    build_gif(tmp_filenames)
+        tmp_filenames.append('td_burger_' + str(n) + '.png')
 
     print('Time steps solved by fenics', t_list)
+
+    path = save_fenics_solution(cache, GroundTruth(u_list, np.array(t_list)))
+    build_gif(tmp_filenames, os.path.join(path, 'td_burgers.gif'))
 
     return GroundTruth(u_list, np.array(t_list))
 
@@ -237,6 +256,7 @@ def build_gif(filenames, outfile=None):
             writer.append_data(image)
     for f in set(filenames):
         os.remove(f)
+
 
 def is_defined(xy, u):
     mesh = u.function_space().mesh()

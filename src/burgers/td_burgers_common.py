@@ -36,14 +36,14 @@ flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
 flags.DEFINE_boolean("td_burger_impose_symmetry", True, "for bc param sampling")
 flags.DEFINE_integer("propagatetime_max", 200_000, "maximum iterations before propagate time step")
-flags.DEFINE_float("propagatetime_rel", 0.05, "rel val improvment change before propagate time step")
+flags.DEFINE_float("propagatetime_rel", 0.025, "rel val improvment change before propagate time step")
 FLAGS.bc_weight = 1.0
 FLAGS.max_holes = 0
 FLAGS.viz_every = int(5e4)
 FLAGS.log_every = int(5e3)
 FLAGS.measure_grad_norm_every = int(2e3)
 FLAGS.outer_steps = int(1e8)
-FLAGS.n_eval = 5
+FLAGS.num_layers = 5
 
 class GroundTruth:
     def __init__(self, fenics_functions_list, timesteps_list):
