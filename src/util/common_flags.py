@@ -62,10 +62,14 @@ flags.DEFINE_integer(
 flags.DEFINE_integer("outer_steps", int(1e8), "num outer steps")
 flags.DEFINE_integer("num_layers", 3, "num fcnn layers")
 flags.DEFINE_integer("layer_size", 64, "fcnn layer size")
+flags.DEFINE_boolean("laaf", False, "use laaf, only works for siren")
 flags.DEFINE_boolean("siren", True, "use siren")
 flags.DEFINE_float("grad_clip", 1e14, "max grad for clipping")
 flags.DEFINE_float("siren_omega", 1.0, "siren_omega")
 flags.DEFINE_float("siren_omega0", 3.0, "siren_omega0")
+flags.DEFINE_boolean("log_scale", True, "io_scale")
+flags.DEFINE_float("io_scale_lr_factor", 1e1, 'scale io lr by this factor')
+
 
 flags.DEFINE_integer("viz_every", int(1e4), "plot every N steps")
 flags.DEFINE_integer("val_every", int(1e2), "validate every N steps")

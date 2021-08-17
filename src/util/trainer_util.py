@@ -62,9 +62,10 @@ def get_ground_truth_points(
         if FLAGS.pde == 'td_burgers':
             # replace random time sampling with fenics val sampled time
             tile_idx = FLAGS.validation_points // (FLAGS.num_tsteps - 1)
-            assert (fn_coords[0: tile_idx, 0: -1] ==
-                    fn_coords[tile_idx: 2 * tile_idx, 0: -1]).all()
-            assert FLAGS.num_tsteps == ground_truth.tsteps
+            if FLAGS.num_tsteps > 2:
+                assert (fn_coords[0: tile_idx, 0: -1] ==
+                        fn_coords[tile_idx: 2 * tile_idx, 0: -1]).all()
+                assert FLAGS.num_tsteps == ground_truth.tsteps
             fn_coords = np.concatenate([fn_coords[0: tile_idx, :]
                                         for _ in range(ground_truth.tsteps)])
             time_axis = np.repeat(
@@ -434,3 +435,16 @@ def get_optimizer(model_class, init_params):
         raise Exception("unknown optimizer: ", FLAGS.optimizer)
 
     return optimizer
+
+@jax.jit
+def loss_laaf(field_fn):
+    penalty = 0
+    k = 1
+    for name, val in field_fn.params.items():
+        if 'laaf' in name:
+            penalty += np.exp(
+                np.power(np.squeeze(val['omega']), k)
+            )
+            k += 1
+
+    return (k - 1) * (1 / penalty)

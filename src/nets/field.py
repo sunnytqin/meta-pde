@@ -18,7 +18,6 @@ from absl import flags
 FLAGS = flags.FLAGS
 
 
-flags.DEFINE_float('io_scale_lr_factor', 1e1, 'scale io lr by this factor')
 
 
 def siren_init(omega):
@@ -151,21 +150,22 @@ def nf_apply(
     sizes,
     dense_args=(),
     nonlinearity=nn.relu,
-    mean_x=None,
-    std_x=None,
-    mean_y=None,
-    std_y=None,
     n_fourier=None,
+    log_scale=False,
     omega=30.0,
     omega0=30.0,
+    use_laaf=False,
 ):
-    log_in_scale = self.param('log_input_scale', (1, x.shape[-1],),
-                               constant_init(np.log(1./FLAGS.io_scale_lr_factor)))
-    in_scale = np.exp(log_in_scale)
+    if log_scale:
+        log_in_scale = self.param('log_input_scale', (1, x.shape[-1],),
+                                   constant_init(np.log(1./FLAGS.io_scale_lr_factor)))
+        in_scale = np.exp(log_in_scale)
+        x = (x.reshape(-1, x.shape[-1]) * in_scale).reshape(x.shape)
 
-    x = (x.reshape(-1, x.shape[-1]) * in_scale).reshape(x.shape)
-
-    if nonlinearity == np.sin:
+    if use_laaf:
+        kernel_init = siren_init(1.0)
+        first_init = kernel_init
+    elif nonlinearity == np.sin:
         kernel_init = siren_init(omega)
         first_init = first_layer_siren_init(omega, omega0)
     else:
@@ -173,26 +173,31 @@ def nf_apply(
             1.0, "fan_in", "truncated_normal"
         )  # flax.nn.initializers.lecun_normal()
         first_init = kernel_init
+
     # x = whiten(x, mean_x, std_x)
     if n_fourier is not None:
         x = fourier_features(x, n_fourier)
+
     for i, size in enumerate(sizes):
         a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
-        if nonlinearity == np.sin:
+        if use_laaf:
+            x = laaf(a)
+        elif nonlinearity == np.sin:
             # omega0 in siren, hacked so we can choose to only do it on first layer
-            x = nonlinearity(a* omega)
+            x = nonlinearity(a * omega)
         else:
             x = nonlinearity(a)
+
     out = flax.nn.Dense(x, out_dim, kernel_init=kernel_init,
                         bias_init=flax.nn.initializers.zeros)
 
-    log_out_scale = self.param('log_output_scale', (1, out_dim,),
-                               constant_init(np.log(1./FLAGS.io_scale_lr_factor)))
-    out_scale = np.exp(log_out_scale)
+    if log_scale:
+        log_out_scale = self.param('log_output_scale', (1, out_dim,),
+                                   constant_init(np.log(1./FLAGS.io_scale_lr_factor)))
+        out_scale = np.exp(log_out_scale)
+        out = (out.reshape(-1, out_dim) * out_scale).reshape(out.shape)
 
-    out = (out.reshape(-1, out_dim) * out_scale).reshape(out.shape)
-
-    return out  # dewhiten(out, mean_y, std_y)
+    return out
 
 
 class NeuralField2d(nn.Module):
@@ -242,6 +247,7 @@ class DivFreeVelocityPressureField(nn.Module):
 
         return np.stack((vel_x, vel_y, pressure), axis=1).reshape((*x_shape[:-1], 3))
 
+
 class DivFreeVelocityField(nn.Module):
     def apply(
             self, x, *args, **kwargs,
@@ -261,9 +267,6 @@ class DivFreeVelocityField(nn.Module):
         vel_y = -gradphi[:, 0]
 
         return np.stack((vel_x, vel_y), axis=1).reshape((*x_shape[:-1], 2))
-
-
-
 
 NeuralPotential = NeuralField1d
 
@@ -331,3 +334,10 @@ class DivFreeField(nn.Module):
         out = make_svf(x, partial(self.get_coefs, mean_x=mean_x, std_x=std_x))
 
         return dewhiten(out, mean_y, std_y)
+
+
+class laaf(nn.Module):
+    def apply(self, x):
+        omega_init = constant_init(1.0)
+        omega = self.param('omega', (1,), omega_init)
+        return np.sin(omega * x)

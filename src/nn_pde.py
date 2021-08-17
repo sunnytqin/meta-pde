@@ -141,18 +141,21 @@ def main(argv):
         nonlinearity=np.sin if FLAGS.siren else nn.swish,
         omega=FLAGS.siren_omega,
         omega0=FLAGS.siren_omega0,
+        log_scale=FLAGS.log_scale,
+        use_laaf=FLAGS.laaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
     _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
 
-    #for k, v in init_params.items():
-    #    print(f"Layer {k}")
-    #    for k2, v2 in v.items():
-    #        print(f"     info -> {k2}: {v2.shape}")
-    #print(init_params)
-    #quit()
+    for k, v in init_params.items():
+        print(f"Layer {k}")
+        if type(v) is not dict:
+            print(f"     info -> {v.shape}")
+        else:
+            for k2, v2 in v.items():
+                print(f"     info -> {k2}: {v2.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -239,7 +242,12 @@ def main(argv):
             bc_weights = None
             loss = np.sum(np.array([v*(FLAGS.bc_weight if k not in FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
 
+        if True:
+            # place holder for laaf loss
+            laaf_loss = trainer_util.loss_laaf(model)
+
         # recompute loss
+        loss = loss + laaf_loss
 
         return loss, (loss_aux, bc_weights)
 
@@ -398,7 +406,6 @@ def main(argv):
         # loss grad norms; plotting the sampled points; plotting the vals at those
         # points; plotting the losses at those points.
 
-        # Todo (alex) -- see if we can clean it up, and maybe also do it in maml etc
         if (
             FLAGS.measure_grad_norm_every > 0
             and step % FLAGS.measure_grad_norm_every == 0
