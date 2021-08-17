@@ -43,6 +43,9 @@ from .util import common_flags
 from absl import app
 from absl import flags
 
+from jax.config import config
+config.update('jax_disable_jit', True)
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 16, "batch size (in tasks)")
@@ -76,8 +79,18 @@ def main(arvg):
             np.array([bl for bl in boundary_losses.values()])
         ) + np.sum(np.array([dl for dl in domain_losses.values()]))
 
+        if FLAGS.laaf:
+            laaf_loss = trainer_util.loss_laaf(field_fn)
+            laaf_loss_dict = {'laaf_loss': laaf_loss}
+
+            # recompute loss
+            loss = loss + laaf_loss
+
         # return the total loss, and as aux a dict of individual losses
-        return loss, {**boundary_losses, **domain_losses}
+        if FLAGS.laaf:
+            return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
+        else:
+            return loss, {**boundary_losses, **domain_losses}
 
     def make_task_loss_fns(key):
         # The input key is terminal
@@ -108,6 +121,10 @@ def main(arvg):
         sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
         dense_args=(),
         nonlinearity=np.sin if FLAGS.siren else nn.swish,
+        omega=FLAGS.siren_omega,
+        omega0=FLAGS.siren_omega0,
+        log_scale=FLAGS.log_scale,
+        use_laaf=FLAGS.laaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
@@ -223,7 +240,8 @@ def main(arvg):
              meta_losses, meta_grad_norm) = train_step(
                  step, subkey, optimizer, inner_lr_state)
             inner_lrs = inner_lr_get(inner_lr_state)
-
+        if np.isnan(np.mean(meta_losses[0])):
+            break
 
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:

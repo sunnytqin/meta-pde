@@ -242,12 +242,11 @@ def main(argv):
             bc_weights = None
             loss = np.sum(np.array([v*(FLAGS.bc_weight if k not in FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
 
-        if True:
-            # place holder for laaf loss
+        if FLAGS.laaf:
             laaf_loss = trainer_util.loss_laaf(model)
 
-        # recompute loss
-        loss = loss + laaf_loss
+            # recompute loss
+            loss = loss + laaf_loss
 
         return loss, (loss_aux, bc_weights)
 
