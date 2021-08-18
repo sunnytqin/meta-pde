@@ -441,7 +441,14 @@ def loss_laaf(field_fn):
     penalty = 0
     k = 1
     for name, val in field_fn.params.items():
-        if 'laaf' in name:
+        if name == '0':
+            for name2, val2 in val.items():
+                if 'laaf' in name2:
+                    penalty += np.exp(
+                        np.power(np.squeeze(val2['omega']), k)
+                    )
+                    k += 1
+        elif 'laaf' in name:
             penalty += np.exp(
                 np.power(np.squeeze(val['omega']), k)
             )

@@ -236,11 +236,20 @@ def main(arvg):
         key, subkey = jax.random.split(key, 2)
 
         with Timer() as t:
-            (optimizer, inner_lr_state, losses,
-             meta_losses, meta_grad_norm) = train_step(
-                 step, subkey, optimizer, inner_lr_state)
+            (optimizer, inner_lr_state, losses, meta_losses, meta_grad_norm) = train_step\
+                    (step, subkey, optimizer, inner_lr_state)
             inner_lrs = inner_lr_get(inner_lr_state)
+
+        if (
+                FLAGS.measure_grad_norm_every > 0
+                and step % FLAGS.measure_grad_norm_every == 0
+        ):
+            meta_losses_report = {k: np.sum(v).astype(float) for k, v in meta_losses[1].items()}
+            log("loss vals and grad norms: ", meta_losses_report)
+            log("meta grad norm: ", meta_grad_norm)
+
         if np.isnan(np.mean(meta_losses[0])):
+            log("encountered nan at at step {}".format(step))
             break
 
         if step % FLAGS.log_every == 0:
@@ -256,7 +265,6 @@ def main(arvg):
                 (optimizer.target, inner_lrs)
             )
 
-        #if step % FLAGS.log_every == 0:
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "

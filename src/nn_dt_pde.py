@@ -68,19 +68,8 @@ def main(argv):
         ) + np.sum(
             np.array([dl for dl in domain_losses.values()]))
 
-        if FLAGS.laaf:
-            laaf_loss = trainer_util.loss_laaf(field_fn)
-            laaf_loss_dict = {'laaf_loss': laaf_loss}
-
-            # recompute loss
-            loss = loss + laaf_loss
-
         # return the total loss, and as aux a dict of individual losses
-        if FLAGS.laaf:
-            return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
-        else:
-            return loss, {**boundary_losses, **domain_losses}
-
+        return loss, {**boundary_losses, **domain_losses}
 
     def task_loss_fn(key, model):
         # The input key is terminal
@@ -158,30 +147,15 @@ def main(argv):
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    if FLAGS.pde == 'td_burgers':
-        _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
-    else:
-        _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-
-    #for k, v in init_params.items():
-    #    print(f"Layer {k}")
-    #    if type(v) is not dict:
-    #        print(f"     info -> {v.shape}")
-    #    else:
-    #        for k2, v2 in v.items():
-    #            print(f"     info -> {k2}: {v2.shape}")
+    _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
 
     for k, v in init_params.items():
-        print(f"{k}")
+        print(f"Layer {k}")
         if type(v) is not dict:
-            print(f"  info -> {k}: {v.shape}")
+            print(f"     info -> {v.shape}")
         else:
             for k2, v2 in v.items():
-                if type(v2) is not dict:
-                    print(f"    info -> {k2}: {v2.shape}")
-                else:
-                    for k3, v3 in v2.items():
-                        print(f"      info -> {k3}: {v3.shape}")
+                print(f"     info -> {k2}: {v2.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -268,6 +242,11 @@ def main(argv):
             bc_weights = None
             loss = np.sum(np.array([v*(FLAGS.bc_weight if k not in FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
 
+        if FLAGS.laaf:
+            laaf_loss = trainer_util.loss_laaf(model)
+
+            # recompute loss
+            loss = loss + laaf_loss
 
         return loss, (loss_aux, bc_weights)
 
@@ -377,19 +356,18 @@ def main(argv):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
-    if FLAGS.pde == 'td_burgers':
-        FLAGS.tmax_nn = 1e-4
-        early_stopping_tracker = deque()
-        propagate_time = False
-        last_prop_step = 0
+    FLAGS.tmax_nn = 1e-4
+    early_stopping_tracker = deque()
+    propagate_time = False
+    last_prop_step = 0
 
-        t_list = []
-        for i in range(FLAGS.num_tsteps):
-            tile_idx = coords.shape[1] // FLAGS.num_tsteps
-            t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
-            t_unique = np.unique(coords[:, t_idx, 2])
-            t_list.append(np.squeeze(t_unique))
-            assert len(t_unique) == 1
+    t_list = []
+    for i in range(FLAGS.num_tsteps):
+        tile_idx = coords.shape[1] // FLAGS.num_tsteps
+        t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+        t_unique = np.unique(coords[:, t_idx, 2])
+        t_list.append(np.squeeze(t_unique))
+        assert len(t_unique) == 1
 
     if FLAGS.pde == 'pressurefree_stokes':
         assert len(fenics_functions) == 1
@@ -414,7 +392,7 @@ def main(argv):
             optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, bc_weights)
 
         # increase NN domain every 100k steps or when we stop seeing val loss improvement
-        if (FLAGS.pde == 'td_burgers') and (propagate_time) and (FLAGS.tmax_nn < FLAGS.tmax):
+        if (propagate_time) and (FLAGS.tmax_nn < FLAGS.tmax):
             FLAGS.tmax_nn += (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
             FLAGS.tmax_nn = np.clip(FLAGS.tmax_nn, a_max=FLAGS.tmax).astype(float)
             log(f"Passing new t max to NN: {FLAGS.tmax_nn}")
@@ -536,15 +514,14 @@ def main(argv):
 
             val_loss = validation_losses(optimizer.target)
 
-            if FLAGS.pde == 'td_burgers' and len(early_stopping_tracker) == 3:
+            if len(early_stopping_tracker) == 3:
                 improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
                 _ = early_stopping_tracker.popleft()
                 if (improve_pct < FLAGS.propagatetime_rel) and (step - last_prop_step) >= (FLAGS.propagatetime_max // 2):
                     propagate_time = True
                 elif (step - last_prop_step) >= FLAGS.propagatetime_max:
                     propagate_time = True
-            if FLAGS.pde == 'td_burgers':
-                early_stopping_tracker.append(val_loss)
+            early_stopping_tracker.append(val_loss)
 
         # if step % FLAGS.log_every == 0:
             if step > 0:
@@ -582,14 +559,18 @@ def main(argv):
 
                 tflogger.log_scalar("val_mse", float(mse), step)
 
-                if FLAGS.pde == 'td_burgers':
-                    plt.figure()
-                    plt.plot(t_list, t_rel_sq_err, '.')
-                    plt.xlabel('t')
-                    plt.ylabel('val rel err')
-                    tflogger.log_plots(
-                        "Per time step relative error", [plt.gcf()], step
-                    )
+                plt.figure()
+                plt.plot(t_list, t_rel_sq_err, '.')
+                plt.xlabel('t')
+                plt.ylabel('val rel err')
+                tflogger.log_plots(
+                    "Per time step relative error", [plt.gcf()], step
+                )
+
+                #for i in range(len(t_rel_sq_err)):
+                #    tflogger.log_scalar(
+                #        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
+                #    )
 
                 for i in range(len(per_dim_rel_err)):
                     tflogger.log_scalar(
