@@ -385,10 +385,22 @@ def vmap_validation_error(
 
     coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
     ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
-    err = coefs - ground_truth_vals
-    mse = np.mean(err ** 2)
-    normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
-    rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
+    # if linear stokes, center mean pressure to 0 before comparing
+    if FLAGS.pde == 'linear_stokes':
+        err_velocity = coefs[:, :, :-1] - ground_truth_vals[:, :, :-1]
+        coefs_p = coefs[:, :, -1] - np.mean(coefs[:, :, -1])
+        ground_truth_vals_p = ground_truth_vals[:, :, -1] - np.mean(ground_truth_vals[:, :, -1])
+        err_pressure = (coefs_p - ground_truth_vals_p)[:, :, np.newaxis]
+        err = np.concatenate([err_velocity, err_pressure], axis=2)
+        mse = np.mean(err ** 2)
+        normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
+        rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
+
+    else:
+        err = coefs - ground_truth_vals
+        mse = np.mean(err ** 2)
+        normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
+        rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
 
     # if contains time dimension, add per time-stepping validation error
     if FLAGS.pde == 'td_burgers':
