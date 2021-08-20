@@ -70,14 +70,14 @@ def main(argv):
 
         if FLAGS.laaf:
             assert not FLAGS.nlaaf
-            laaf_loss = trainer_util.loss_laaf(field_fn)
+            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_laaf(field_fn)
             laaf_loss_dict = {'laaf_loss': laaf_loss}
             # recompute loss
             loss = loss + laaf_loss
 
         elif FLAGS.nlaaf:
             assert not FLAGS.laaf
-            laaf_loss = trainer_util.loss_nlaaf(field_fn)
+            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_nlaaf(field_fn)
             laaf_loss_dict = {'laaf_loss': laaf_loss}
 
             # recompute loss
@@ -165,6 +165,7 @@ def main(argv):
         omega0=FLAGS.siren_omega0,
         log_scale=FLAGS.log_scale,
         use_laaf=FLAGS.laaf,
+        use_nlaaf=FLAGS.nlaaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
@@ -284,7 +285,7 @@ def main(argv):
 
         return loss, (loss_aux, bc_weights)
 
-    bc_weights = None
+    #bc_weights = None
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -424,7 +425,7 @@ def main(argv):
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
-            optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, bc_weights)
+            optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, None)
 
         # increase NN domain every 100k steps or when we stop seeing val loss improvement
         if (FLAGS.pde == 'td_burgers') and (propagate_time) and (FLAGS.tmax_nn < FLAGS.tmax):
