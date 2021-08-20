@@ -455,3 +455,25 @@ def loss_laaf(field_fn):
             k += 1
 
     return (k - 1) * (1 / penalty)
+
+
+@jax.jit
+def loss_nlaaf(field_fn):
+    penalty = 0
+    k = 1
+    for name, val in field_fn.params.items():
+        if name == '0':
+            for name2, val2 in val.items():
+                if 'laaf' in name2:
+                    n_activations = val2['omega'].shape[0]
+                    penalty += np.exp(
+                        np.sum(np.power(np.squeeze(val2['omega']), k)) / n_activations
+                    )
+                    k += 1
+        elif 'laaf' in name:
+            penalty += np.exp(
+                np.power(np.squeeze(val['omega']), k)
+            )
+            k += 1
+
+    return (k - 1) * (1 / penalty)

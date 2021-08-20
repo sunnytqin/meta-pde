@@ -69,14 +69,22 @@ def main(argv):
             np.array([dl for dl in domain_losses.values()]))
 
         if FLAGS.laaf:
+            assert not FLAGS.nlaaf
             laaf_loss = trainer_util.loss_laaf(field_fn)
+            laaf_loss_dict = {'laaf_loss': laaf_loss}
+            # recompute loss
+            loss = loss + laaf_loss
+
+        elif FLAGS.nlaaf:
+            assert not FLAGS.laaf
+            laaf_loss = trainer_util.loss_nlaaf(field_fn)
             laaf_loss_dict = {'laaf_loss': laaf_loss}
 
             # recompute loss
             loss = loss + laaf_loss
 
         # return the total loss, and as aux a dict of individual losses
-        if FLAGS.laaf:
+        if FLAGS.laaf or FLAGS.nlaaf:
             return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
         else:
             return loss, {**boundary_losses, **domain_losses}
@@ -142,8 +150,11 @@ def main(argv):
         for k in loss_grads:
             if k == FLAGS.domain_loss:
                 continue
-            bc_weights[k] = (1 - FLAGS.annealing_alpha) * bc_weights_prev[k] + \
-                            FLAGS.annealing_alpha * (domain_loss_grad_max / bc_weights[k])
+            if bc_weights_prev is not None:
+                bc_weights[k] = (1 - FLAGS.annealing_alpha) * bc_weights_prev[k] + \
+                                FLAGS.annealing_alpha * (domain_loss_grad_max / bc_weights[k])
+            else:
+                bc_weights[k] = domain_loss_grad_max / bc_weights[k]
         return bc_weights
 
     Field = pde.BaseField.partial(
@@ -174,14 +185,16 @@ def main(argv):
     for k, v in init_params.items():
         print(f"{k}")
         if type(v) is not dict:
-            print(f"  info -> {k}: {v.shape}")
+            print(f"   -> {k}: {v.shape}")
         else:
+            print(f"   -> {k}")
             for k2, v2 in v.items():
                 if type(v2) is not dict:
-                    print(f"    info -> {k2}: {v2.shape}")
+                    print(f"     -> {k2}: {v2.shape}")
                 else:
+                    print(f"     -> {k2}")
                     for k3, v3 in v2.items():
-                        print(f"      info -> {k3}: {v3.shape}")
+                        print(f"      i -> {k3}: {v3.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -246,7 +259,7 @@ def main(argv):
             # do nothing if not annealing and not pcgrad-ing
             if (not FLAGS.annealing and not FLAGS.pcgrad):
                 continue
-            assert False
+            #assert False
             single_loss_fn = lambda model: np.mean(vmap_task_loss_fn(keys, model)[1][k])
             _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
             loss_grads[k] = loss_grad
@@ -437,7 +450,7 @@ def main(argv):
             log("loss vals and grad norms: ", loss_vals_and_grad_norms)
             if FLAGS.annealing:
                 bc_weights = {k: float(v) for k, v in bc_weights.items()}
-                log("bc weigths for annealing: ", bc_weights)
+                log(f"bc weigths for annealing (l2={FLAGS.annealing_l2}): ", bc_weights)
                 if step > 0:
                     assert(bc_weights != None )
 

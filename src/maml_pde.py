@@ -44,7 +44,7 @@ from absl import app
 from absl import flags
 
 from jax.config import config
-config.update('jax_disable_jit', True)
+#config.update('jax_disable_jit', True)
 
 FLAGS = flags.FLAGS
 

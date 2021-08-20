@@ -155,6 +155,7 @@ def nf_apply(
     omega=30.0,
     omega0=30.0,
     use_laaf=False,
+    use_nlaaf=False,
 ):
     if log_scale:
         log_in_scale = self.param('log_input_scale', (1, x.shape[-1],),
@@ -162,7 +163,7 @@ def nf_apply(
         in_scale = np.exp(log_in_scale)
         x = (x.reshape(-1, x.shape[-1]) * in_scale).reshape(x.shape)
 
-    if use_laaf:
+    if use_laaf or use_nlaaf:
         kernel_init = siren_init(1.0)
         first_init = kernel_init
     elif nonlinearity == np.sin:
@@ -182,6 +183,8 @@ def nf_apply(
         a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
         if use_laaf:
             x = laaf(a)
+        elif use_nlaaf:
+            x = nlaaf(a)
         elif nonlinearity == np.sin:
             # omega0 in siren, hacked so we can choose to only do it on first layer
             x = nonlinearity(a * omega)
@@ -338,6 +341,13 @@ class DivFreeField(nn.Module):
 
 class laaf(nn.Module):
     def apply(self, x):
-        omega_init = constant_init(1.0)
+        omega_init = constant_init(1.)
         omega = self.param('omega', (1,), omega_init)
         return np.sin(omega * x)
+
+class nlaaf(nn.Module):
+    def apply(self, x):
+        omega_init = constant_init(1.)
+        omega = self.param('omega', (x.shape[-1],), omega_init)
+        return np.sin(omega * x)
+

@@ -534,74 +534,23 @@ def error_on_coords(fenics_fn, jax_fn, coords=None):
 def plot_solution(u_p, params):
     _, _, per_hole_params, num_holes = params
     u, p = fa.split(u_p)
-    X, Y = npo.meshgrid(
-        npo.linspace(FLAGS.xmin, FLAGS.xmax, 300),
-        npo.linspace(FLAGS.ymin, FLAGS.ymax, 100),
-    )
-    Xflat, Yflat = X.reshape(-1), Y.reshape(-1)
 
-    # X, Y = X[valid], Y[valid]
-    valid = [is_defined([x, y], u_p) for x, y in zip(Xflat, Yflat)]
-
-    UV = [
-        u_p(x, y)[:2] if is_defined([x, y], u_p) else npo.array([0.0, 0.0])
-        for x, y in zip(Xflat, Yflat)
-    ]
-
-    U = npo.array([uv[0] for uv in UV]).reshape(X.shape)
-    V = npo.array([uv[1] for uv in UV]).reshape(Y.shape)
-
-    X_, Y_ = npo.meshgrid(
-        npo.linspace(FLAGS.xmin, FLAGS.xmax, 60),
-        npo.linspace(FLAGS.ymin, FLAGS.ymax, 40),
-    )
-    Xflat_, Yflat_ = X_.reshape(-1), Y_.reshape(-1)
-
-    # X, Y = X[valid], Y[valid]
-    valid_ = [is_defined([x, y], u_p) for x, y in zip(Xflat_, Yflat_)]
-    Xflat_, Yflat_ = Xflat_[valid_], Yflat_[valid_]
-    UV_ = [u_p(x, y)[:2] for x, y in zip(Xflat_, Yflat_)]
-
-    U_ = npo.array([uv[0] for uv in UV_])
-    V_ = npo.array([uv[1] for uv in UV_])
-
-    speed = npo.linalg.norm(npo.stack([U, V], axis=2), axis=2)
-
-    speed_ = npo.linalg.norm(npo.stack([U_, V_], axis=1), axis=1)
-
-    seed_points = npo.stack(
-        [
-            FLAGS.xmin * npo.ones(40),
-            npo.linspace(FLAGS.ymin + 0.1, FLAGS.ymax - 0.1, 40),
-        ],
-        axis=1,
-    )
-
-    parr = npo.array([p([x, y]) for x, y in zip(Xflat_, Yflat_)])
-
-    fa.plot(
+    c = fa.plot(
         p,
         mode="color",
         shading="gouraud",
         edgecolors="k",
         linewidth=0.0,
         cmap="BuPu",
-        vmin=parr.min() - 0.5 * parr.max() - 0.5,
-        vmax=2 * parr.max() - parr.min() + 0.5,
     )
-    plt.quiver(Xflat_, Yflat_, U_, V_, speed_ / speed_.max(), alpha=0.7)
+    cb = plt.colorbar(c, shrink=.8)
+    cb.set_label('Pressure', size=6, c='b')
+    cb.ax.tick_params(labelsize=6, color='blue')
 
-    plt.streamplot(
-        X,
-        Y,
-        U,
-        V,
-        color=speed / speed.max(),
-        start_points=seed_points,
-        density=10,
-        linewidth=0.2,
-        arrowsize=0.0,
-    )  # , np.sqrt(U**2+V**2))
+    cc = fa.plot(u)
+    ccb = plt.colorbar(cc, shrink=.8)
+    ccb.set_label('Veloctiy', size=6, c='g')
+    ccb.ax.tick_params(labelsize=6, color='green')
 
 
 def main(argv):
