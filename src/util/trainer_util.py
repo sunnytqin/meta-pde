@@ -223,6 +223,8 @@ def compare_plots_with_ground_truth(
         for j in range(0, inner_steps + 1):
             plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
             plt.axis("off")
+            plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
+            plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
 
             final_model = get_final_model(
                 keys[i], model, params_list[i], j, meta_alg_def,
@@ -476,15 +478,16 @@ def loss_nlaaf(field_fn):
     for name, val in field_fn.params.items():
         if name == '0':
             for name2, val2 in val.items():
-                if 'laaf' in name2:
+                if 'nlaaf' in name2:
                     n_activations = val2['omega'].shape[0]
                     penalty += np.exp(
                         np.sum(np.power(np.squeeze(val2['omega']), k)) / n_activations
                     )
                     k += 1
-        elif 'laaf' in name:
+        elif 'nlaaf' in name:
+            n_activations = val['omega'].shape[0]
             penalty += np.exp(
-                np.power(np.squeeze(val['omega']), k)
+                np.sum(np.power(np.squeeze(val['omega']), k)) / n_activations
             )
             k += 1
 

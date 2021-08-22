@@ -30,8 +30,8 @@ flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("pressure_factor", 10.0, "scale on random uniform bc")
-flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
-flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
+flags.DEFINE_integer("max_holes", 1, "scale on random uniform bc")
+flags.DEFINE_float("max_hole_size", 0.3, "scale on random uniform bc")
 
 flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
 
@@ -216,7 +216,7 @@ def sample_params(key):
     )[0]
 
     pore_shapes = jax.random.uniform(
-        k4, minval=-0.2, maxval=0.2, shape=(FLAGS.max_holes, 2,)
+        k4, minval=-0.1, maxval=0.1, shape=(FLAGS.max_holes, 2,)
     )
 
     pore_sizes = jax.random.uniform(
@@ -228,10 +228,10 @@ def sample_params(key):
 
     min_step = FLAGS.max_hole_size
 
-    xlow = FLAGS.xmin + 1.5 * FLAGS.max_hole_size
-    xhigh = FLAGS.xmax - 1.5 * FLAGS.max_hole_size
-    ylow = FLAGS.ymin + 1.5 * FLAGS.max_hole_size
-    yhigh = FLAGS.ymax - 1.5 * FLAGS.max_hole_size
+    xlow = FLAGS.xmin + 2.5 * FLAGS.max_hole_size
+    xhigh = FLAGS.xmax - 2.5 * FLAGS.max_hole_size
+    ylow = FLAGS.ymin + 2.5 * FLAGS.max_hole_size
+    yhigh = FLAGS.ymax - 2.5 * FLAGS.max_hole_size
 
     pore_x0y0 = jax.random.uniform(k7,
                                    minval=np.array([[xlow, ylow]]),
@@ -543,14 +543,14 @@ def plot_solution(u_p, params):
         linewidth=0.0,
         cmap="BuPu",
     )
-    cb = plt.colorbar(c, shrink=.8)
-    cb.set_label('Pressure', size=6, c='b')
-    cb.ax.tick_params(labelsize=6, color='blue')
+    #cb = plt.colorbar(c, shrink=.8)
+    #cb.set_label('Pressure', size=6, c='b')
+    #cb.ax.tick_params(labelsize=6, color='blue')
 
     cc = fa.plot(u)
-    ccb = plt.colorbar(cc, shrink=.8)
-    ccb.set_label('Veloctiy', size=6, c='g')
-    ccb.ax.tick_params(labelsize=6, color='green')
+    #ccb = plt.colorbar(cc, shrink=.8)
+    #ccb.set_label('Veloctiy', size=6, c='g')
+    #ccb.ax.tick_params(labelsize=6, color='green')
 
 
 def main(argv):

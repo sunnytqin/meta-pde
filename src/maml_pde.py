@@ -127,7 +127,10 @@ def main(arvg):
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
+    if FLAGS.pde == 'td_burgers':
+        _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
+    else:
+        _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -219,13 +222,14 @@ def main(arvg):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
-    t_list = []
-    for i in range(FLAGS.num_tsteps):
-        tile_idx = coords.shape[1] // FLAGS.num_tsteps
-        t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
-        t_unique = np.unique(coords[:, t_idx, 2])
-        t_list.append(np.squeeze(t_unique))
-        assert len(t_unique) == 1
+    if FLAGS.pde == 'td_burgers':
+        t_list = []
+        for i in range(FLAGS.num_tsteps):
+            tile_idx = coords.shape[1] // FLAGS.num_tsteps
+            t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+            t_unique = np.unique(coords[:, t_idx, 2])
+            t_list.append(np.squeeze(t_unique))
+            assert len(t_unique) == 1
 
     time_last_log = time.time()
     # --------------------- Run MAML --------------------
@@ -319,13 +323,14 @@ def main(arvg):
                     )
                     tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
 
-                plt.figure()
-                plt.plot(t_list, t_rel_sq_err, '.')
-                plt.xlabel('t')
-                plt.ylabel('val rel err')
-                tflogger.log_plots(
-                    "Per time step relative error", [plt.gcf()], step
-                )
+                if FLAGS.pde == 'td_burgers':
+                    plt.figure()
+                    plt.plot(t_list, t_rel_sq_err, '.')
+                    plt.xlabel('t')
+                    plt.ylabel('val rel err')
+                    tflogger.log_plots(
+                        "Per time step relative error", [plt.gcf()], step
+                    )
 
                 #for i in range(len(t_rel_sq_err)):
                 #    tflogger.log_scalar(
