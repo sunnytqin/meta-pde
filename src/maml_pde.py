@@ -79,14 +79,24 @@ def main(arvg):
 
         if FLAGS.laaf:
             laaf_loss = trainer_util.loss_laaf(field_fn)
+            assert not FLAGS.nlaaf
+            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_laaf(field_fn)
+            laaf_loss_dict = {'laaf_loss': laaf_loss}
+
+            # recompute loss
+            loss = loss + laaf_loss
+
+        elif FLAGS.nlaaf:
+            assert not FLAGS.laaf
+            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_nlaaf(field_fn)
             laaf_loss_dict = {'laaf_loss': laaf_loss}
 
             # recompute loss
             loss = loss + laaf_loss
 
         # return the total loss, and as aux a dict of individual losses
-        if FLAGS.laaf:
-            return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
+        if FLAGS.laaf or FLAGS.nlaaf:
+                return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
         else:
             return loss, {**boundary_losses, **domain_losses}
 
@@ -131,6 +141,19 @@ def main(arvg):
         _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
     else:
         _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+
+    for k, v in init_params.items():
+        if type(v) is not dict:
+            print(f"-> {k}: {v.shape}")
+        else:
+            print(f"   -> {k}")
+            for k2, v2 in v.items():
+                if type(v2) is not dict:
+                    print(f"     -> {k2}: {v2.shape}")
+                else:
+                    print(f"     -> {k2}")
+                    for k3, v3 in v2.items():
+                        print(f"      i -> {k3}: {v3.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 

@@ -175,18 +175,9 @@ def main(argv):
     else:
         _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
-    #for k, v in init_params.items():
-    #    print(f"Layer {k}")
-    #    if type(v) is not dict:
-    #        print(f"     info -> {v.shape}")
-    #    else:
-    #        for k2, v2 in v.items():
-    #            print(f"     info -> {k2}: {v2.shape}")
-
     for k, v in init_params.items():
-        print(f"{k}")
         if type(v) is not dict:
-            print(f"   -> {k}: {v.shape}")
+            print(f" -> {k}: {v.shape}")
         else:
             print(f"   -> {k}")
             for k2, v2 in v.items():

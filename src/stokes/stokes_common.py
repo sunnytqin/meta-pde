@@ -29,7 +29,7 @@ flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-flags.DEFINE_float("pressure_factor", 10.0, "scale on random uniform bc")
+flags.DEFINE_float("pressure_factor", 1.0, "scale on random uniform bc")
 flags.DEFINE_integer("max_holes", 1, "scale on random uniform bc")
 flags.DEFINE_float("max_hole_size", 0.3, "scale on random uniform bc")
 
@@ -128,15 +128,16 @@ def loss_stress_fn(field_fn, points_in_domain, params):
 
 def loss_inlet_fn(field_fn, points_on_inlet, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    sinusoidal_magnitude = np.sin(
+    sinusoidal_magnitude_x = bc_params[0] * np.sin(
         np.pi * (points_on_inlet[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin)
     ).reshape(-1, 1)
+    sinusoidal_magnitude_y = bc_params[1] * np.sin(
+        np.pi * (points_on_inlet[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin)
+    ).reshape(-1, 1)
+    sinusoidal_magnitude = np.concatenate([sinusoidal_magnitude_x, sinusoidal_magnitude_y], axis=1)
     u = get_u(field_fn)
 
-    return (
-        u(points_on_inlet)
-        - bc_params[0] * sinusoidal_magnitude * np.array([1.0, 0.0]).reshape(1, 2)
-    ) ** 2
+    return (u(points_on_inlet) - sinusoidal_magnitude) ** 2
 
 
 def loss_noslip_fn(field_fn, points_noslip, params):
@@ -199,7 +200,7 @@ def sample_params(key):
     source_params = jax.random.uniform(k1, shape=(2,), minval=1 / 4, maxval=3.0 / 4)
 
     bc_params = FLAGS.bc_scale * jax.random.uniform(
-        k2, minval=-1.0, maxval=1.0, shape=(1,)
+        k2, minval=-1.0, maxval=1.0, shape=(2,)
     )
 
     if not FLAGS.max_holes > 0:
@@ -215,7 +216,7 @@ def sample_params(key):
         maxval=np.array([FLAGS.max_holes + 1])
     )[0]
 
-    pore_shapes = jax.random.uniform(
+    pore_shapes = 0.0 * jax.random.uniform(
         k4, minval=-0.1, maxval=0.1, shape=(FLAGS.max_holes, 2,)
     )
 
@@ -233,7 +234,7 @@ def sample_params(key):
     ylow = FLAGS.ymin + 2.5 * FLAGS.max_hole_size
     yhigh = FLAGS.ymax - 2.5 * FLAGS.max_hole_size
 
-    pore_x0y0 = jax.random.uniform(k7,
+    pore_x0y0 = 0.0 * jax.random.uniform(k7,
                                    minval=np.array([[xlow, ylow]]),
                                    maxval=np.array([[xhigh, yhigh]]),
                                    shape=(FLAGS.max_holes, 2))
@@ -558,7 +559,7 @@ def main(argv):
 
     key, subkey = jax.random.split(jax.random.PRNGKey(FLAGS.seed))
 
-    for i in range(1, 10):
+    for i in range(1, 5):
         key, sk1, sk2 = jax.random.split(key, 3)
         params = sample_params(sk1)
 

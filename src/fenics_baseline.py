@@ -32,10 +32,9 @@ from absl import flags
 
 FLAGS = flags.FLAGS
 
-# parser = argparse.ArgumentParser()
 flags.DEFINE_string(
     "test_resolutions",
-    "1,2,3,4,5,6,8,10,12,16",
+    "1,4,8,12,16",
     "mesh resolutions for fenics baseline. expect comma sep ints",
 )
 
@@ -48,7 +47,7 @@ def main(argv):
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
 
-    log(str(FLAGS))
+    log(FLAGS.flags_into_string())
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
     key, gt_key, gt_points_key = jax.random.split(key, 3)
@@ -75,10 +74,25 @@ def main(argv):
         test_vals = test_vals.reshape(test_vals.shape[0], test_vals.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(test_vals.shape)
         err = test_vals - ground_truth_vals
-        gt_normalizer = np.mean(ground_truth_vals ** 2, axis=(1,2), keepdims=True)
-        test_normalizer = np.mean(ground_truth_vals ** 2, axis=(1,2), keepdims=True)
+        gt_normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
+        rel_sq_err = err**2 / gt_normalizer.mean(axis=2, keepdims=True)
+        rel_err = np.mean(rel_sq_err)
+        rel_err_std = np.std(np.mean(rel_sq_err, axis=(1, 2)))
+        per_dim_rel_err = np.mean(rel_sq_err, axis=(0, 1))
+        # if contains time dimension, add per time-stepping validation error
+        if FLAGS.pde == 'td_burgers':
+            t_rel_sq_err = []
+            tile_idx = test_vals.shape[1] // FLAGS.num_tsteps
+            for i in range(FLAGS.num_tsteps):
+                t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
+                t_err = err[:, t_idx, :]
+                t_normalizer = np.mean(ground_truth_vals[:, t_idx, :] ** 2, axis=1, keepdims=True)
+                t_rel_sq_err.append(np.mean(t_err ** 2 / t_normalizer.mean(axis=2, keepdims=True)))
+        else:
+            t_rel_sq_err = None
+
         assert len(err.shape) == 3
-        return (err ** 2, gt_normalizer, test_normalizer)  # n_pdes x n_points x n_dims
+        return (err ** 2, gt_normalizer, rel_err, rel_err_std, per_dim_rel_err, t_rel_sq_err)  # n_pdes x n_points x n_dims
 
     errs = {}
     times = {}
@@ -96,18 +110,24 @@ def main(argv):
         errs[res] = validation_error(gt_vals, test_vals)
         times[res] = t.interval / FLAGS.n_eval
 
-    npo.save(os.path.join(path, "errors_by_resolution.npy"), (errs, times))
+    npo.save(os.path.join(path, "errors_by_resolution.npy"), (errs, times), allow_pickle=True)
 
-    pdb.set_trace()
+    #pdb.set_trace()
 
     for res in test_resolutions:
-        log("res: {}, rel_mse: {}, std_rel_mse: {}, time: {}".format(
-            res, np.mean(errs[res][0]/errs[res][1]),
-            np.std(np.mean(errs[res][0]/errs[res][1], axis=(1,2))),
+        log("res: {}, rel_mse: {}, std_rel_mse: {}, per_dim_rel_mse: {}, t_rel_sq_err: {}, time: {}".format(
+            res,
+            #np.mean(errs[res][0]/errs[res][1]),
+            (errs[res][2]).astype(float),
+            (errs[res][3]).astype(float),
+            npo.array(errs[res][4]),
+            npo.array(errs[res][5]),
+            #np.std(np.mean(errs[res][0]/errs[res][1], axis=(1,2))),
             times[res]
         ))
+        # errs = (err ** 2, gt_normalizer, rel_err, rel_err_std, per_dim_rel_err)
 
-    pdb.set_trace()
+    #pdb.set_trace()
 
 
 if __name__ == "__main__":

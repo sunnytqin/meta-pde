@@ -95,8 +95,9 @@ def solve_fenics(params, boundary_points=32, resolution=32):
 
     # Define function for setting Dirichlet values
     lhs_expr = fa.Expression(
-        ("A*sin(pi*(x[1]-ymin)/(ymax-ymin))", 0.0),
+        ("A*sin(pi*(x[1]-ymin)/(ymax-ymin))", "B*sin(pi*(x[1]-ymin)/(ymax-ymin))"),
         A=float(bc_params[0]),
+        B=float(bc_params[1]),
         ymax=FLAGS.ymax,
         ymin=FLAGS.ymin,
         element=V.ufl_element(),
