@@ -29,6 +29,7 @@ from .util import jax_tools
 from .util import trainer_util
 
 import matplotlib.pyplot as plt
+from collections import deque
 import pdb
 import sys
 import os
@@ -78,7 +79,6 @@ def main(arvg):
         ) + np.sum(np.array([dl for dl in domain_losses.values()]))
 
         if FLAGS.laaf:
-            laaf_loss = trainer_util.loss_laaf(field_fn)
             assert not FLAGS.nlaaf
             laaf_loss = FLAGS.laaf_weight * trainer_util.loss_laaf(field_fn)
             laaf_loss_dict = {'laaf_loss': laaf_loss}
@@ -96,7 +96,7 @@ def main(arvg):
 
         # return the total loss, and as aux a dict of individual losses
         if FLAGS.laaf or FLAGS.nlaaf:
-                return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
+            return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
         else:
             return loss, {**boundary_losses, **domain_losses}
 
@@ -133,6 +133,7 @@ def main(arvg):
         omega0=FLAGS.siren_omega0,
         log_scale=FLAGS.log_scale,
         use_laaf=FLAGS.laaf,
+        use_nlaaf=FLAGS.nlaaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
@@ -146,14 +147,14 @@ def main(arvg):
         if type(v) is not dict:
             print(f"-> {k}: {v.shape}")
         else:
-            print(f"   -> {k}")
+            print(f"-> {k}")
             for k2, v2 in v.items():
                 if type(v2) is not dict:
-                    print(f"     -> {k2}: {v2.shape}")
+                    print(f"  -> {k2}: {v2.shape}")
                 else:
-                    print(f"     -> {k2}")
+                    print(f"  -> {k2}")
                     for k3, v3 in v2.items():
-                        print(f"      i -> {k3}: {v3.shape}")
+                        print(f"    -> {k3}: {v3.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -246,6 +247,11 @@ def main(arvg):
     )
 
     if FLAGS.pde == 'td_burgers':
+        FLAGS.tmax_nn = 1e-4
+        early_stopping_tracker = deque()
+        propagate_time = False
+        last_prop_step = 0
+
         t_list = []
         for i in range(FLAGS.num_tsteps):
             tile_idx = coords.shape[1] // FLAGS.num_tsteps
@@ -289,6 +295,17 @@ def main(arvg):
             val_losses, val_meta_losses = validation_losses(
                 (optimizer.target, inner_lrs)
             )
+
+            if FLAGS.pde == 'td_burgers' and len(early_stopping_tracker) == 3:
+                val_loss = np.mean(val_meta_losses[0])
+                improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
+                _ = early_stopping_tracker.popleft()
+                if (improve_pct < FLAGS.propagatetime_rel) and (step - last_prop_step) >= (FLAGS.propagatetime_max // 2):
+                    propagate_time = True
+                elif (step - last_prop_step) >= FLAGS.propagatetime_max:
+                    propagate_time = True
+            if FLAGS.pde == 'td_burgers':
+                early_stopping_tracker.append(val_loss)
 
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
@@ -355,35 +372,30 @@ def main(arvg):
                         "Per time step relative error", [plt.gcf()], step
                     )
 
-                #for i in range(len(t_rel_sq_err)):
-                #    tflogger.log_scalar(
-                #        "val_rel_err_t={:.2f}".format(t_list[i]), float(t_rel_sq_err[i]), step
-                #    )
-
                 for inner_step in range(FLAGS.inner_steps + 1):
                     tflogger.log_scalar(
-                        "loss_step_{}".format(inner_step),
+                        "loss_inner_step_{}".format(inner_step),
                         float(np.mean(losses[0][:, inner_step])),
                         step,
                     )
                     tflogger.log_scalar(
-                        "val_loss_step_{}".format(inner_step),
+                        "val_loss_inner_step_{}".format(inner_step),
                         float(np.mean(val_losses[0][:, inner_step])),
                         step,
                     )
                     tflogger.log_histogram(
-                        "batch_loss_step_{}".format(inner_step),
+                        "batch_loss_inner_step_{}".format(inner_step),
                         losses[0][:, inner_step],
                         step,
                     )
                     tflogger.log_histogram(
-                        "batch_val_loss_step_{}".format(inner_step),
+                        "batch_val_loss_inner_step_{}".format(inner_step),
                         val_losses[0][:, inner_step],
                         step,
                     )
                     for k in losses[1]:
                         tflogger.log_scalar(
-                            "{}_step_{}".format(k, inner_step),
+                            "{}_inner_step_{}".format(k, inner_step),
                             float(np.mean(losses[1][k][:, inner_step])),
                             step,
                         )

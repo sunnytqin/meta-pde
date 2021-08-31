@@ -29,7 +29,7 @@ flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
 flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-flags.DEFINE_float("pressure_factor", 1.0, "scale on random uniform bc")
+flags.DEFINE_float("pressure_factor", 10.0, "scale on random uniform bc")
 flags.DEFINE_integer("max_holes", 1, "scale on random uniform bc")
 flags.DEFINE_float("max_hole_size", 0.3, "scale on random uniform bc")
 

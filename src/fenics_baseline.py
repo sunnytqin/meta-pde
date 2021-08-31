@@ -30,11 +30,14 @@ import argparse
 from absl import app
 from absl import flags
 
+import tracemalloc
+
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
     "test_resolutions",
-    "1,4,8,12,16",
+    "1,2,4,6,8,10,12,16",
     "mesh resolutions for fenics baseline. expect comma sep ints",
 )
 
@@ -98,6 +101,7 @@ def main(argv):
     times = {}
 
     for res in test_resolutions:
+        print('resolution: ', res)
         with Timer() as t:
             test_fns, test_vals, test_coords = trainer_util.get_ground_truth_points(
                 pde,
@@ -106,6 +110,22 @@ def main(argv):
                 resolution=res,
                 boundary_points=int(FLAGS.boundary_resolution_factor * res),
             )
+            plt.figure(figsize=(5, 5))
+            fa.plot(test_fns[0].function_space().mesh())
+
+            u, p = test_fns[0].split()
+            plt.figure(figsize=(9, 3))
+            clrs = fa.plot(u)
+            plt.colorbar(clrs)
+
+            plt.figure(figsize=(9, 3))
+            fa.plot(u)
+            plt.show()
+
+            #plt.figure(figsize=(5, 5))
+            #print('test_fn', type(test_fns[0]))
+            #fa.plot(test_fns[0])
+            #lt.show()
         assert np.allclose(test_coords, coords)
         errs[res] = validation_error(gt_vals, test_vals)
         times[res] = t.interval / FLAGS.n_eval

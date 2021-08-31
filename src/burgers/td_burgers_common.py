@@ -304,7 +304,7 @@ def sample_points(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2, k3, k4, k5 = jax.random.split(key, 5)
     n_on_walls = n
-    n_on_holes = n // 2 - n_on_walls #- n_on_inlet - n_on_outlet
+    n_on_holes = n // 2 #- n_on_walls #- n_on_inlet - n_on_outlet
     points_on_vertical = sample_points_on_vertical(k1, n_on_walls, params)
     points_on_horizontal = sample_points_on_horizontal(k2, n_on_walls, params)
     points_initial = sample_points_initial(k3, n_on_walls, params)

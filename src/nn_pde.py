@@ -1,4 +1,5 @@
 """Fit NN to one PDE."""
+
 from jax.config import config
 from .util import trainer_util
 import jax
@@ -37,6 +38,8 @@ from .util import common_flags
 from absl import app
 from absl import flags
 
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = 'false'
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 1, "batch size (in tasks)")
@@ -49,9 +52,6 @@ def main(argv):
 
     FLAGS.n_eval = 1
     FLAGS.fixed_num_pdes = 1
-    FLAGS.vary_bc = False
-    FLAGS.vary_source = False
-    FLAGS.vary_geometry = False
 
     pde = get_pde(FLAGS.pde)
 

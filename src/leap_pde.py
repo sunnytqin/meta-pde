@@ -45,13 +45,14 @@ from absl import flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 16, "batch size (in tasks)")
-flags.DEFINE_float("outer_lr", 1e-4, "outer learning rate")
+flags.DEFINE_float("outer_lr", 1e-3, "outer learning rate")
 
-flags.DEFINE_float("inner_lr", 1e-5, "inner learning rate")
+flags.DEFINE_float("inner_lr", 3e-5, "inner learning rate")
 flags.DEFINE_float("inner_grad_clip", 1e14, "inner grad clipping")
 
 flags.DEFINE_integer("inner_steps", 10, "num_inner_steps")
 
+FLAGS.td_burger_impose_symmetry = False
 
 def main(argv):
     if FLAGS.out_dir is None:
@@ -72,8 +73,27 @@ def main(argv):
             np.array([bl for bl in boundary_losses.values()])
         ) + np.sum(np.array([dl for dl in domain_losses.values()]))
 
+        if FLAGS.laaf:
+            assert not FLAGS.nlaaf
+            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_laaf(field_fn)
+            laaf_loss_dict = {'laaf_loss': laaf_loss}
+
+            # recompute loss
+            loss = loss + laaf_loss
+
+        elif FLAGS.nlaaf:
+            assert not FLAGS.laaf
+            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_nlaaf(field_fn)
+            laaf_loss_dict = {'laaf_loss': laaf_loss}
+
+            # recompute loss
+            loss = loss + laaf_loss
+
         # return the total loss, and as aux a dict of individual losses
-        return loss, {**boundary_losses, **domain_losses}
+        if FLAGS.laaf or FLAGS.nlaaf:
+            return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
+        else:
+            return loss, {**boundary_losses, **domain_losses}
 
     def make_task_loss_fn(key):
         # The input key is terminal
@@ -101,17 +121,39 @@ def main(argv):
         sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
         dense_args=(),
         nonlinearity=np.sin if FLAGS.siren else nn.swish,
+        omega=FLAGS.siren_omega,
+        omega0=FLAGS.siren_omega0,
+        log_scale=FLAGS.log_scale,
+        use_laaf=FLAGS.laaf,
+        use_nlaaf=FLAGS.nlaaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+    if FLAGS.pde == 'td_burgers':
+        _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
+    else:
+        _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+
+
+    for k, v in init_params.items():
+        if type(v) is not dict:
+            print(f"-> {k}: {v.shape}")
+        else:
+            print(f"-> {k}")
+            for k2, v2 in v.items():
+                if type(v2) is not dict:
+                    print(f"  -> {k2}: {v2.shape}")
+                else:
+                    print(f"  -> {k2}")
+                    for k3, v3 in v2.items():
+                        print(f"    -> {k3}: {v3.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
     # --------------------- Defining the evaluation functions --------------------
 
-    # @partial(jax.jit, static_argnums=(3, 4))
+    @partial(jax.jit, static_argnums=(3, 4))
     def get_final_model(key, model, params, inner_steps, leap_def):
         # Input key is terminal
         k1, k2 = jax.random.split(key, 2)
@@ -121,9 +163,9 @@ def main(argv):
         temp_leap_def = leap_def._replace(inner_steps=inner_steps)
         final_model = jax.lax.cond(
             inner_steps != 0,
-            lambda _: leap.single_task_rollout(temp_leap_def, k2, model, inner_loss_fn)[
-                0
-            ],
+            lambda _: leap.single_task_rollout(
+                temp_leap_def, k2, model, inner_loss_fn
+            )[0],
             lambda _: model,
             0,
         )
@@ -179,6 +221,15 @@ def main(argv):
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
+    if FLAGS.pde == 'td_burgers':
+        t_list = []
+        for i in range(FLAGS.num_tsteps):
+            tile_idx = coords.shape[1] // FLAGS.num_tsteps
+            t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+            t_unique = np.unique(coords[:, t_idx, 2])
+            t_list.append(np.squeeze(t_unique))
+            assert len(t_unique) == 1
+
     time_last_log = time.time()
 
     # --------------------- Run LEAP --------------------
@@ -189,19 +240,17 @@ def main(argv):
         with Timer() as t:
             optimizer, losses, meta_grad_norm = train_step(subkey, optimizer)
 
-        if step % FLAGS.val_every == 0:
+        if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
-                mse, norms, rel_err, per_dim_rel_err, rel_err_std = trainer_util.vmap_validation_error(
+                mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = trainer_util.vmap_validation_error(
                     optimizer.target, gt_params, coords,
                     fenics_vals,
                     partial_make_coef_func)
                 mse.block_until_ready()
             deployment_time = deploy_timer.interval / FLAGS.n_eval
 
-
             val_losses = validation_losses(optimizer.target)
 
-        if step % FLAGS.log_every == 0:
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
@@ -254,10 +303,21 @@ def main(argv):
                         "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
                     )
                     tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
+
                 for k in losses[1]:
                     tflogger.log_scalar(
                         "meta_" + k, float(np.mean(losses[1][k][:, -1])), step
                     )
+
+                if FLAGS.pde == 'td_burgers':
+                    plt.figure()
+                    plt.plot(t_list, t_rel_sq_err, '.')
+                    plt.xlabel('t')
+                    plt.ylabel('val rel err')
+                    tflogger.log_plots(
+                        "Per time step relative error", [plt.gcf()], step
+                    )
+
                 for inner_step in range(FLAGS.inner_steps + 1):
                     tflogger.log_scalar(
                         "loss_step_{}".format(inner_step),
@@ -312,8 +372,21 @@ def main(argv):
             if tflogger is not None:
                 tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
-    if FLAGS.expt_name is not None:
-        outfile.close()
+            if FLAGS.pde == 'td_burgers':
+                tmp_filenames = trainer_util.plot_model_time_series(
+                    optimizer.target,
+                    pde,
+                    fenics_functions,
+                    gt_params,
+                    get_final_model,
+                    leap_def,
+                    FLAGS.inner_steps,
+                )
+                gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
+                pde.build_gif(tmp_filenames, outfile=gif_out)
+
+    #if FLAGS.expt_name is not None:
+    #    outfile.close()
 
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
@@ -329,6 +402,19 @@ def main(argv):
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
     else:
         plt.show()
+
+    if FLAGS.pde == 'td_burgers':
+        tmp_filenames = trainer_util.plot_model_time_series(
+            optimizer.target,
+            pde,
+            fenics_functions,
+            gt_params,
+            get_final_model,
+            leap_def,
+            FLAGS.inner_steps,
+        )
+        gif_out = os.path.join(path, "td_burger_final.gif".format(step))
+        pde.build_gif(tmp_filenames, outfile=gif_out)
 
 
 if __name__ == "__main__":

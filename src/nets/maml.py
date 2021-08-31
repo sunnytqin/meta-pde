@@ -128,6 +128,7 @@ def single_task_rollout(
     else:
         assert inner_steps == -1
 
+    @jax.checkpoint
     def body_fn(carry, lr):
         opt, key, meta_loss = carry
         k1, k2, k3 = jax.random.split(key, 3)

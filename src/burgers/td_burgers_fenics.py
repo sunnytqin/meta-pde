@@ -22,6 +22,14 @@ from ..util.trainer_util import read_fenics_solution, save_fenics_solution
 
 FLAGS = flags.FLAGS
 
+if __name__ == "__main__":
+    flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
+    flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
+    flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
+    flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
+    flags.DEFINE_integer("max_holes", 0, "scale on random uniform bc")
+    flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
+    FLAGS.ground_truth_resolution = 16
 
 from .td_burgers_common import (
     plot_solution,
@@ -95,7 +103,6 @@ def solve_fenics(params, boundary_points=24, resolution=16):
 
     u = fa.Function(V)
     v = fa.TestFunction(V)
-    du = fa.TrialFunction(V)
 
     # generate cache data
     cache = {
@@ -114,7 +121,8 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         u_list.append(u.copy(deepcopy=True))
         t_list.append(FLAGS.tmin + dt * n)
     solved = read_fenics_solution(cache, u_list)
-    if solved:
+    reuse = True
+    if solved and reuse:
         return GroundTruth(u_list, np.array(t_list))
 
     # Define function for setting Dirichlet values
@@ -161,7 +169,7 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     u_n = fa.project(u_D, V)
     bc_vertical = fa.DirichletBC(V, vertical_expr, vertical_walls)
     bc_horizontal = fa.DirichletBC(V, horizontal_expr, horizontal_walls)
-    #bc_nonslip = fa.DirichletBC(V, non_slip, non_slip_walls)
+    bc_nonslip = fa.DirichletBC(V, non_slip, non_slip_walls)
 
     # Define variational problem
     u.vector().set_local(np.random.randn(len(u.vector())) * 1e-6)
@@ -241,8 +249,9 @@ def solve_fenics(params, boundary_points=24, resolution=16):
 
     print('Time steps solved by fenics', t_list)
 
-    path = save_fenics_solution(cache, GroundTruth(u_list, np.array(t_list)))
-    build_gif(tmp_filenames, os.path.join(path, 'td_burgers.gif'))
+    if not solved:
+        path = save_fenics_solution(cache, GroundTruth(u_list, np.array(t_list)))
+        build_gif(tmp_filenames, os.path.join(path, 'td_burgers.gif'))
 
     return GroundTruth(u_list, np.array(t_list))
 
@@ -296,7 +305,8 @@ def main(argv):
         )
 
     plt.figure(figsize=(5, 5))
-    plot_solution(u, params)
+    #plot_solution(u, params)
+    fa.plot(u)
     plt.show()
 
     plt.figure(figsize=(5, 5))
@@ -316,20 +326,20 @@ def main(argv):
     plt.scatter(points_wall[:, 0], points_wall[:, 1], color="g", alpha=0.5)
     plt.scatter(points_inlet[:, 0], points_inlet[:, 1], color="r", alpha=0.5)
     plt.scatter(points_outlet[:, 0], points_outlet[:, 1], color="y", alpha=0.5)
-
+    plt.scatter(points_pores[:, 0], points_pores[:, 1], color="k", alpha=0.5)
     plt.scatter(points_domain[:, 0], points_domain[:, 1], color="b", alpha=0.5)
 
     plt.show()
 
 
 if __name__ == "__main__":
-    flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
-    flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
-    flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_integer("max_holes", 0, "scale on random uniform bc")
-    flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
-    FLAGS.ground_truth_resolution = 32
+    #flags.DEFINE_float("xmin", -1.0, "scale on random uniform bc")
+    #flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
+    #flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
+    #flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
+    #flags.DEFINE_integer("max_holes", 0, "scale on random uniform bc")
+    #flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
+    #FLAGS.ground_truth_resolution = 32
     app.run(main)
     #args = parser.parse_args()
     #args = namedtuple("ArgsTuple", vars(args))(**vars(args))
