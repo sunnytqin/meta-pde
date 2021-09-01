@@ -211,23 +211,23 @@ def compare_plots_with_ground_truth(
 
     for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
         ground_truth = fenics_functions[i]
-
-        plt.subplot(inner_steps + 2, min([N, 8]), 1 + i)
+        plt_inner_steps = 5
+        plt.subplot(plt_inner_steps + 2, min([N, 8]), 1 + i)
         plt.axis("off")
         plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
         plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
         ground_truth.set_allow_extrapolation(False)
         pde.plot_solution(ground_truth, params_list[i])
         if i == 0:
-            plt.title("Truth", fontsize=6)
-        for j in range(0, inner_steps + 1):
+            plt.title("Truth", fontsize=4)
+        steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
+        for j, step in enumerate(steps_plot): #range(0, inner_steps + 1):
             plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
-            plt.axis("off")
             plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
             plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
 
             final_model = get_final_model(
-                keys[i], model, params_list[i], j, meta_alg_def,
+                keys[i], model, params_list[i], step, meta_alg_def,
             )
 
             coords = ground_truth.function_space().tabulate_dof_coordinates()
@@ -261,8 +261,16 @@ def compare_plots_with_ground_truth(
             u_approx.vector().set_local(out)
 
             pde.plot_solution(u_approx, params_list[i])
-            if j == 0:
+            if (i == 0) and (j == 0):
                 plt.title("NN Model", fontsize=4)
+                plt.tick_params(axis='both', length=0)
+                plt.ylabel(f"Step {step}", fontsize=4)
+            elif i == 0:
+                plt.tick_params(axis='both', length=0)
+                plt.ylabel(f"Step {step}", fontsize=4)
+            else:
+                plt.axis("off")
+            plt.tight_layout()
 
 def plot_model_time_series(
     model,

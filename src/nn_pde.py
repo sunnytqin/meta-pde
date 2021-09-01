@@ -38,8 +38,6 @@ from .util import common_flags
 from absl import app
 from absl import flags
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = 'false'
-
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 1, "batch size (in tasks)")
@@ -528,8 +526,6 @@ def main(argv):
                     tflogger.log_plots(
                         "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
-
-
 
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:

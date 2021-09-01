@@ -348,10 +348,6 @@ def main(arvg):
                 tflogger.log_histogram("batch_val_losses", val_meta_losses[0], step)
                 tflogger.log_scalar("meta_loss", float(np.mean(meta_losses[0])), step)
                 tflogger.log_scalar("val_loss", float(np.mean(val_meta_losses[0])), step)
-                for k in meta_losses[1]:
-                    tflogger.log_scalar(
-                        "meta_" + k, float(np.mean(meta_losses[1][k])), step
-                    )
                 tflogger.log_scalar("val_rel_mse", float(rel_err), step)
                 tflogger.log_scalar("std_val_rel_mse", float(rel_err_std), step)
 
@@ -362,48 +358,68 @@ def main(arvg):
                         "val_rel_error_dim_{}".format(i), float(per_dim_rel_err[i]), step
                     )
                     tflogger.log_scalar("val_norm_dim_{}".format(i), float(norms[i]), step)
-
-                if FLAGS.pde == 'td_burgers':
-                    plt.figure()
-                    plt.plot(t_list, t_rel_sq_err, '.')
-                    plt.xlabel('t')
-                    plt.ylabel('val rel err')
-                    tflogger.log_plots(
-                        "Per time step relative error", [plt.gcf()], step
+                for k in meta_losses[1]:
+                    tflogger.log_scalar(
+                        "meta_" + k, float(np.mean(meta_losses[1][k])), step
                     )
 
-                for inner_step in range(FLAGS.inner_steps + 1):
-                    tflogger.log_scalar(
-                        "loss_inner_step_{}".format(inner_step),
-                        float(np.mean(losses[0][:, inner_step])),
-                        step,
-                    )
-                    tflogger.log_scalar(
-                        "val_loss_inner_step_{}".format(inner_step),
-                        float(np.mean(val_losses[0][:, inner_step])),
-                        step,
-                    )
-                    tflogger.log_histogram(
-                        "batch_loss_inner_step_{}".format(inner_step),
-                        losses[0][:, inner_step],
-                        step,
-                    )
-                    tflogger.log_histogram(
-                        "batch_val_loss_inner_step_{}".format(inner_step),
-                        val_losses[0][:, inner_step],
-                        step,
-                    )
-                    for k in losses[1]:
-                        tflogger.log_scalar(
-                            "{}_inner_step_{}".format(k, inner_step),
-                            float(np.mean(losses[1][k][:, inner_step])),
-                            step,
-                        )
                 tflogger.log_scalar("meta_grad_norm", float(meta_grad_norm), step)
                 tflogger.log_scalar("step_time", t.interval, step)
 
                 if step % FLAGS.viz_every == 0:
                     # These take lots of filesize so only do them sometimes
+                    if FLAGS.pde == 'td_burgers':
+                        plt.figure()
+                        plt.plot(t_list, t_rel_sq_err, '.')
+                        plt.xlabel('t')
+                        plt.ylabel('val rel err')
+                        tflogger.log_plots(
+                            "Per time step relative error", [plt.gcf()], step
+                        )
+
+                    plt.figure()
+                    plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(losses[0], axis=0))
+                    plt.xlabel('Inner Step')
+                    plt.ylabel('Loss')
+                    tflogger.log_plots(
+                        "Per inner step step loss", [plt.gcf()], step
+                    )
+
+                    plt.figure()
+                    plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(val_losses[0], axis=0))
+                    plt.xlabel('Inner Step')
+                    plt.ylabel('Val Loss')
+                    tflogger.log_plots(
+                        "Per inner step step val loss", [plt.gcf()], step
+                    )
+
+                    for inner_step in range(FLAGS.inner_steps + 1):
+                        # tflogger.log_scalar(
+                        #    "loss_inner_step_{}".format(inner_step),
+                        #    float(np.mean(losses[0][:, inner_step])),
+                        #    step,
+                        # )
+                        # tflogger.log_scalar(
+                        #    "val_loss_inner_step_{}".format(inner_step),
+                        #    float(np.mean(val_losses[0][:, inner_step])),
+                        #    step,
+                        # )
+                        tflogger.log_histogram(
+                            "batch_loss_inner_step_{}".format(inner_step),
+                            losses[0][:, inner_step],
+                            step,
+                        )
+                        tflogger.log_histogram(
+                            "batch_val_loss_inner_step_{}".format(inner_step),
+                            val_losses[0][:, inner_step],
+                            step,
+                        )
+                        # for k in losses[1]:
+                        #    tflogger.log_scalar(
+                        #        "{}_inner_step_{}".format(k, inner_step),
+                        #        float(np.mean(losses[1][k][:, inner_step])),
+                        #        step,
+                        #    )
 
                     for k, v in jax_tools.dict_flatten(optimizer.target.params):
                         tflogger.log_histogram("Param: " + k, v.flatten(), step)

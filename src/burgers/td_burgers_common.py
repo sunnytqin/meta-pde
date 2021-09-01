@@ -43,7 +43,6 @@ FLAGS.viz_every = int(5e4)
 FLAGS.log_every = int(5e3)
 FLAGS.measure_grad_norm_every = int(2e3)
 FLAGS.outer_steps = int(1e8)
-#FLAGS.num_layers = 5
 
 class GroundTruth:
     def __init__(self, fenics_functions_list, timesteps_list):
@@ -641,7 +640,7 @@ def main(argv):
         plt.legend()
 
         plt.subplot(5, 1, 2)
-        plt.hist(points_on_horizontal[:, 2], bins=t_bins,label="points on horizontal walls")
+        plt.hist(points_on_horizontal[:, 2], bins=t_bins, label="points on horizontal walls")
         plt.legend()
 
         plt.subplot(5, 1, 3)
