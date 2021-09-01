@@ -211,8 +211,8 @@ def compare_plots_with_ground_truth(
 
     for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
         ground_truth = fenics_functions[i]
-        plt_inner_steps = 5
-        plt.subplot(plt_inner_steps + 2, min([N, 8]), 1 + i)
+        plt_inner_steps = min(max(inner_steps, 1), 5)
+        plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + i)
         plt.axis("off")
         plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
         plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
@@ -222,7 +222,7 @@ def compare_plots_with_ground_truth(
             plt.title("Truth", fontsize=4)
         steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
         for j, step in enumerate(steps_plot): #range(0, inner_steps + 1):
-            plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
+            plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
             plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
             plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
 
@@ -263,14 +263,13 @@ def compare_plots_with_ground_truth(
             pde.plot_solution(u_approx, params_list[i])
             if (i == 0) and (j == 0):
                 plt.title("NN Model", fontsize=4)
-                plt.tick_params(axis='both', length=0)
+                plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
                 plt.ylabel(f"Step {step}", fontsize=4)
             elif i == 0:
-                plt.tick_params(axis='both', length=0)
+                plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
                 plt.ylabel(f"Step {step}", fontsize=4)
             else:
                 plt.axis("off")
-            plt.tight_layout()
 
 def plot_model_time_series(
     model,

@@ -14,7 +14,7 @@ import fenics as fa
 
 from .util.timer import Timer
 
-from .util import jax_tools, trainer_util, common_flags
+from .util import jax_tools, trainer_util, common_flags, trainer_util
 
 
 import matplotlib.pyplot as plt
@@ -58,6 +58,8 @@ def main(argv):
     gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
     gt_params = vmap(pde.sample_params)(gt_keys)
     print("gt_params: {}".format(gt_params))
+    #for i in range(len(gt_keys)):
+    #    print(f"{i}: {jax_tools.tree_unstack(gt_params)[i]}")
 
     gt_functions, gt_vals, coords = trainer_util.get_ground_truth_points(
         pde,
@@ -71,17 +73,21 @@ def main(argv):
 
     test_resolutions = [int(s) for s in FLAGS.test_resolutions.split(',')]
 
-    def validation_error(
-        ground_truth_vals, test_vals,
-    ):
+    def make_coef_func(key, model, params, coords):
+        return model
+
+    def validation_error(ground_truth_vals, test_vals):
         test_vals = test_vals.reshape(test_vals.shape[0], test_vals.shape[1], -1)
         ground_truth_vals = ground_truth_vals.reshape(test_vals.shape)
         err = test_vals - ground_truth_vals
-        gt_normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
-        rel_sq_err = err**2 / gt_normalizer.mean(axis=2, keepdims=True)
+        mse = np.mean(err ** 2)
+        normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
+        rel_sq_err = err**2 / normalizer.mean(axis=2, keepdims=True)
+
         rel_err = np.mean(rel_sq_err)
         rel_err_std = np.std(np.mean(rel_sq_err, axis=(1, 2)))
         per_dim_rel_err = np.mean(rel_sq_err, axis=(0, 1))
+
         # if contains time dimension, add per time-stepping validation error
         if FLAGS.pde == 'td_burgers':
             t_rel_sq_err = []
@@ -95,13 +101,34 @@ def main(argv):
             t_rel_sq_err = None
 
         assert len(err.shape) == 3
-        return (err ** 2, gt_normalizer, rel_err, rel_err_std, per_dim_rel_err, t_rel_sq_err)  # n_pdes x n_points x n_dims
+        return (
+            mse,
+            np.mean(normalizer, axis=(0, 1)),
+            rel_err,
+            per_dim_rel_err,
+            rel_err_std,
+            t_rel_sq_err,
+        )
 
     errs = {}
     times = {}
 
     for res in test_resolutions:
-        print('resolution: ', res)
+        time_tracker = []
+        for i in range(len(gt_keys)):
+            with Timer() as t:
+                _, _, _ = trainer_util.get_ground_truth_points(
+                    pde,
+                    [jax_tools.tree_unstack(gt_params)[i]],
+                    gt_points_key,
+                    resolution=res,
+                    boundary_points=int(FLAGS.boundary_resolution_factor * res),
+                )
+            time_tracker.append(t.interval)
+        print(f'resolution {res}: {time_tracker}')
+
+    for res in test_resolutions:
+        print('resolution: ')
         with Timer() as t:
             test_fns, test_vals, test_coords = trainer_util.get_ground_truth_points(
                 pde,
@@ -110,23 +137,42 @@ def main(argv):
                 resolution=res,
                 boundary_points=int(FLAGS.boundary_resolution_factor * res),
             )
-            plt.figure(figsize=(5, 5))
-            fa.plot(test_fns[0].function_space().mesh())
 
-            u, p = test_fns[0].split()
-            plt.figure(figsize=(9, 3))
-            clrs = fa.plot(u)
-            plt.colorbar(clrs)
+        plt.figure(figsize=(5, 5))
+        fa.plot(test_fns[0].function_space().mesh())
 
-            plt.figure(figsize=(9, 3))
-            fa.plot(u)
-            plt.show()
+        u, p = test_fns[0].split()
+        plt.figure(figsize=(9, 3))
+        clrs = fa.plot(u)
+        plt.colorbar(clrs)
 
-            #plt.figure(figsize=(5, 5))
-            #print('test_fn', type(test_fns[0]))
-            #fa.plot(test_fns[0])
-            #lt.show()
-        assert np.allclose(test_coords, coords)
+        plt.figure(figsize=(9, 3))
+        fa.plot(u)
+        #plt.show()
+
+        #plt.figure(figsize=(5, 5))
+        #print('test_fn', type(test_fns[0]))
+        #fa.plot(test_fns[0])
+        #lt.show()
+        #assert np.allclose(test_coords, coords)
+
+        mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = validation_error(test_vals, gt_vals)
+
+        log(
+            "res: {}, val_mse: {}, "
+            "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
+            "per_dim_rel_err: {}, per_time_step_error: {} ,time: {}".format(
+                res,
+                mse,
+                rel_err,
+                rel_err_std,
+                norms,
+                per_dim_rel_err,
+                t_rel_sq_err,
+                t.interval,
+            )
+        )
+
         errs[res] = validation_error(gt_vals, test_vals)
         times[res] = t.interval / FLAGS.n_eval
 
@@ -134,18 +180,18 @@ def main(argv):
 
     #pdb.set_trace()
 
-    for res in test_resolutions:
-        log("res: {}, rel_mse: {}, std_rel_mse: {}, per_dim_rel_mse: {}, t_rel_sq_err: {}, time: {}".format(
-            res,
-            #np.mean(errs[res][0]/errs[res][1]),
-            (errs[res][2]).astype(float),
-            (errs[res][3]).astype(float),
-            npo.array(errs[res][4]),
-            npo.array(errs[res][5]),
-            #np.std(np.mean(errs[res][0]/errs[res][1], axis=(1,2))),
-            times[res]
-        ))
-        # errs = (err ** 2, gt_normalizer, rel_err, rel_err_std, per_dim_rel_err)
+    #for res in test_resolutions:
+    #    log("res: {}, rel_mse: {}, std_rel_mse: {}, per_dim_rel_mse: {}, t_rel_sq_err: {}, time: {}".format(
+    #        res,
+    #        #np.mean(errs[res][0]/errs[res][1]),
+    #        (errs[res][2]).astype(float),
+    #        (errs[res][3]).astype(float),
+    #        npo.array(errs[res][4]),
+    #        npo.array(errs[res][5]),
+    #        #np.std(np.mean(errs[res][0]/errs[res][1], axis=(1,2))),
+    #        times[res]
+    #    ))
+    #    # errs = (err ** 2, gt_normalizer, rel_err, rel_err_std, per_dim_rel_err)
 
     #pdb.set_trace()
 
