@@ -36,7 +36,6 @@ if __name__ == "__main__":
 
 def epsilon_fn(x, field_fn):
     assert len(x.shape) == 1
-    dtype = x.dtype
     jac = jax.jacfwd(lambda x: field_fn(x).squeeze())(x)
 
     strain_rate = (jac + jac.transpose()) / 2  # Strain rate function
@@ -63,19 +62,22 @@ def loss_domain_fn(field_fn, points_in_domain, params):
     lhs = vmap_divergence_tensor(points_in_domain, sigma_fn_def)
 
     rho = 1.0
-    b = -10.
-    rhs = np.array([0, b*rho])
+    b_z = -10.
+    rhs = np.array([0, b_z*rho])
 
     err = (lhs + rhs)**2
 
     return err
 
 
+@partial(jax.jit, static_argnums=(0,))
 def loss_top_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
     g_z = -5.
     sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_top)
-    err = (sigma[:, :, 1] - g_z * np.array([1, 1]))**2
+    normal = np.array([0., 1.])
+    err = jax.vmap(lambda x: np.matmul(x, normal) - g_z * np.array([1, 1]))(sigma)
+    err = err**2
     return err
 
 
@@ -84,10 +86,21 @@ def loss_bottom_fn(field_fn, points_on_bottom, params):
     return field_fn(points_on_bottom)** 2
 
 
-def loss_vertical_fn(field_fn, points_on_walls, params):
+def loss_left_fn(field_fn, points_on_left, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_walls)
-    err = (sigma[:, :, 0]) ** 2
+    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_left)
+    normal = np.array([0., -1.])
+    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
+    err = err ** 2
+    return err
+
+
+def loss_right_fn(field_fn, points_on_right, params):
+    source_params, bc_params, per_hole_params, n_holes = params
+    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_right)
+    normal = np.array([0., 1.])
+    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
+    err = err ** 2
     return err
 
 
@@ -95,7 +108,8 @@ def loss_fn(field_fn, points, params):
     (
         points_on_top,
         points_on_bottom,
-        points_on_walls,
+        points_on_left,
+        points_on_right,
         points_on_holes,
         points_in_domain,
     ) = points
@@ -104,7 +118,8 @@ def loss_fn(field_fn, points, params):
         {
             "loss_top": np.mean(loss_top_fn(field_fn, points_on_top, params)),
             "loss_bottom": np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
-            "loss_vertical": np.mean(loss_vertical_fn(field_fn, points_on_walls, params)),
+            "loss_left": np.mean(loss_left_fn(field_fn, points_on_left, params)),
+            "loss_right": np.mean(loss_right_fn(field_fn, points_on_right, params)),
         },
         {
             "loss_domain": np.mean(loss_domain_fn(field_fn, points_in_domain, params)),
@@ -179,21 +194,23 @@ def is_in_hole(xy, pore_params, tol=1e-7):
 @partial(jax.jit, static_argnums=(1,))
 def sample_points(key, n, params):
     _, _, per_hole_params, n_holes = params
-    k1, k2, k3, k4, k5 = jax.random.split(key, 5)
+    k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
     ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
     n_on_boundary = n // 2
     points_on_top = sample_points_top(k1, n_on_boundary, params)
     points_on_bottom = sample_points_bottom(k2, n_on_boundary, params)
-    points_on_walls = sample_points_on_walls(k3, n_on_boundary, params)
+    points_on_left = sample_points_left(k3, n_on_boundary, params)
+    points_on_right = sample_points_right(k4, n_on_boundary, params)
     if FLAGS.max_holes > 0:
-        points_on_holes = sample_points_on_pores(k4, n_on_boundary, params)
+        points_on_holes = sample_points_on_pores(k5, n_on_boundary, params)
     else:
         points_on_holes = points_on_top
-    points_in_domain = sample_points_in_domain(k5, n, params)
+    points_in_domain = sample_points_in_domain(k6, n, params)
     return (
         points_on_top,
         points_on_bottom,
-        points_on_walls,
+        points_on_left,
+        points_on_right,
         points_on_holes,
         points_in_domain,
     )
@@ -203,40 +220,46 @@ def sample_points(key, n, params):
 def sample_points_top(key, n, params):
     _, _, _, _ = params
     top_x = np.linspace(FLAGS.xmin, FLAGS.xmax, n, endpoint=False) + jax.random.uniform(
-        key, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / n, shape=(1,)
+        key, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n, shape=(1,)
     )
     top = np.stack([top_x, FLAGS.ymax * np.ones(n)], axis=1)
     return top
 
 
+@partial(jax.jit, static_argnums=(1,))
 def sample_points_bottom(key, n, params):
     _, _, _, _ = params
     bottom_x = np.linspace(FLAGS.xmin, FLAGS.xmax, n, endpoint=False) + jax.random.uniform(
-        key, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / n, shape=(1,)
+        key, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n, shape=(1,)
     )
     bottom = np.stack([bottom_x, FLAGS.ymin * np.ones(n)], axis=1)
     return bottom
 
 
 @partial(jax.jit, static_argnums=(1,))
-def sample_points_on_walls(key, n, params):
+def sample_points_left(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2 = jax.random.split(key)
     left_y = np.linspace(
         FLAGS.ymin, FLAGS.ymax, n // 2, endpoint=False
     ) + jax.random.uniform(
-        k1, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / (n // 2), shape=(1,)
+        k1, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / (n // 2), shape=(1,)
     )
     left = np.stack([FLAGS.xmin * np.ones(n // 2), left_y], axis=1)
+    return left
 
+
+@partial(jax.jit, static_argnums=(1,))
+def sample_points_right(key, n,  params):
+    _, _, per_hole_params, n_holes = params
+    k1, k2 = jax.random.split(key)
     right_y = np.linspace(
         FLAGS.ymin, FLAGS.ymax, n - n // 2, endpoint=False
     ) + jax.random.uniform(
         k2, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / (n - n // 2), shape=(1,)
     )
     right = np.stack([FLAGS.xmax * np.ones(n - n // 2), right_y], axis=1)
-
-    return np.concatenate([left, right])
+    return right
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -366,22 +389,26 @@ def main(argv):
 
         points = sample_points(sk2, 512, params)
         (
-            points_on_inlet,
-            points_on_outlet,
-            points_on_walls,
+            points_on_top,
+            points_on_bottom,
+            points_on_left,
+            points_on_right,
             points_on_holes,
             points_in_domain,
         ) = points
         plt.figure()
         plt.subplot(1, 1, 1)
         plt.scatter(
-            points_on_inlet[:, 0], points_on_inlet[:, 1], label="points on inlet"
+            points_on_top[:, 0], points_on_top[:, 1], label="points on top"
         )
         plt.scatter(
-            points_on_outlet[:, 0], points_on_outlet[:, 1], label="points on outlet"
+            points_on_bottom[:, 0], points_on_bottom[:, 1], label="points on bottom"
         )
         plt.scatter(
-            points_on_walls[:, 0], points_on_walls[:, 1], label="points on walls"
+            points_on_left[:, 0], points_on_left[:, 1], label="points on left"
+        )
+        plt.scatter(
+            points_on_right[:, 0], points_on_right[:, 1], label="points on right"
         )
         plt.xlabel("X")
         plt.ylabel("Y")
