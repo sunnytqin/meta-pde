@@ -75,14 +75,20 @@ def loss_top_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
     g_z = -5.
     sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_top)
-    err = (sigma[:, :, 1] - g_z * np.array([0, 1]))**2
+    err = (sigma[:, :, 1] - g_z * np.array([1, 1]))**2
     return err
 
 
 def loss_bottom_fn(field_fn, points_on_bottom, params):
-    #print("loss bottom fn =================> ", points_on_bottom.shape)
     source_params, bc_params, per_hole_params, n_holes = params
     return field_fn(points_on_bottom)** 2
+
+
+def loss_vertical_fn(field_fn, points_on_walls, params):
+    source_params, bc_params, per_hole_params, n_holes = params
+    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_walls)
+    err = (sigma[:, :, 0]) ** 2
+    return err
 
 
 def loss_fn(field_fn, points, params):
@@ -93,12 +99,12 @@ def loss_fn(field_fn, points, params):
         points_on_holes,
         points_in_domain,
     ) = points
-    points_in_domain = np.concatenate([points_in_domain, points_on_walls, points_on_walls])
-    #print("points in domain ==========>", points_in_domain.shape)
+    points_in_domain = np.concatenate([points_in_domain, points_on_holes])
     return (
         {
             "loss_top": np.mean(loss_top_fn(field_fn, points_on_top, params)),
             "loss_bottom": np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
+            "loss_vertical": np.mean(loss_vertical_fn(field_fn, points_on_walls, params)),
         },
         {
             "loss_domain": np.mean(loss_domain_fn(field_fn, points_in_domain, params)),
@@ -172,7 +178,6 @@ def is_in_hole(xy, pore_params, tol=1e-7):
 
 @partial(jax.jit, static_argnums=(1,))
 def sample_points(key, n, params):
-    #print("sampling points ====================> ", n)
     _, _, per_hole_params, n_holes = params
     k1, k2, k3, k4, k5 = jax.random.split(key, 5)
     ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
