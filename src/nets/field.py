@@ -270,7 +270,9 @@ class DivFreeVelocityPressureSeparateField(nn.Module):
         vel_y = -gradphi[:, 0]
 
         base_pressure_field = NeuralField1d.shared(**kwargs)
-        pressure = base_pressure_field(x)
+        pressure = np.array(base_pressure_field(
+            np.stack((vel_x, vel_y, x[:, 0], x[:, 1]), axis=1).reshape((*x_shape[:-1], 4))
+        )).reshape(vel_x.shape)
 
         return np.stack((vel_x, vel_y, pressure), axis=1).reshape((*x_shape[:-1], 3))
 

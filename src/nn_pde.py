@@ -173,18 +173,22 @@ def main(argv):
     else:
         _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
-    for k, v in init_params.items():
-        if type(v) is not dict:
-            print(f" -> {k}: {v.shape}")
-        else:
-            print(f"   -> {k}")
-            for k2, v2 in v.items():
-                if type(v2) is not dict:
-                    print(f"     -> {k2}: {v2.shape}")
-                else:
-                    print(f"     -> {k2}")
-                    for k3, v3 in v2.items():
-                        print(f"      i -> {k3}: {v3.shape}")
+    log(
+        'NN model:', jax.tree_map(lambda x: x.shape, init_params)
+    )
+
+    #for k, v in init_params.items():
+    #    if type(v) is not dict:
+    #        print(f" -> {k}: {v.shape}")
+    #    else:
+    #        print(f"   -> {k}")
+    #        for k2, v2 in v.items():
+    #            if type(v2) is not dict:
+    #                print(f"     -> {k2}: {v2.shape}")
+    #            else:
+    #                print(f"     -> {k2}")
+    #                for k3, v3 in v2.items():
+    #                    print(f"      i -> {k3}: {v3.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -648,6 +652,13 @@ def main(argv):
                 )
                 gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
                 pde.build_gif(tmp_filenames, outfile=gif_out)
+
+            # save model
+            bytes_output = flax.serialization.to_bytes(optimizer.target)
+            f = open(os.path.join(path, "nn_step_{}.txt".format(step)), "wb")
+            f.write(bytes_output)
+            f.close()
+
 
     #if FLAGS.expt_name is not None:
     #    outfile.close()

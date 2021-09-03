@@ -4,7 +4,7 @@ from .stokes import stokes_def
 from .stokes import pfreestokes_def
 #from .burgers import burgers_def
 from .burgers import td_burgers_def
-
+from .elasticity import elasticity_def
 
 
 FLAGS = flags.FLAGS
@@ -37,6 +37,10 @@ def get_pde(pde_name):
         FLAGS.stokes_nonlinear = True
         FLAGS.domain_loss = ["loss_stress"]
         return stokes_def
+
+    elif pde_name == "elasticity":
+        FLAGS.domain_loss = "loss_domain"
+        return elasticity_def
 
     else:
         raise Exception("Invalid PDE {}".format(pde_name))
