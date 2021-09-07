@@ -102,10 +102,11 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     mu = E / 2 / (1 + nu)
 
     # Load
-    g_z = -5.
+    g_x = bc_params[0]
+    g_y = bc_params[1]
     b_z = -10.
-    g = fa.Constant((g_z, 0.0))
-    b = fa.Constant((0.0, b_z))
+    g = fa.Constant((g_x, g_y))
+    b = fa.Constant((0.0, b_z * rho))
 
     # Definition of Neumann condition domain
     boundaries = fa.MeshFunction("size_t", mesh, mesh.topology().dim() - 1)

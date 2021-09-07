@@ -223,8 +223,10 @@ def compare_plots_with_ground_truth(
         steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
         for j, step in enumerate(steps_plot): #range(0, inner_steps + 1):
             plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
-            plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
-            plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
+            plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
+                          FLAGS.xmax * 1.1])
+            plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
+                          FLAGS.ymax * 1.1])
 
             final_model = get_final_model(
                 keys[i], model, params_list[i], step, meta_alg_def,
@@ -263,10 +265,10 @@ def compare_plots_with_ground_truth(
             pde.plot_solution(u_approx, params_list[i])
             if (i == 0) and (j == 0):
                 plt.title("NN Model", fontsize=4)
-                plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
+                plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
                 plt.ylabel(f"Step {step}", fontsize=4)
             elif i == 0:
-                plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
+                plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
                 plt.ylabel(f"Step {step}", fontsize=4)
             else:
                 plt.axis("off")

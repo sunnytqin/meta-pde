@@ -26,9 +26,9 @@ FLAGS = flags.FLAGS
 
 if __name__ == "__main__":
     flags.DEFINE_float("xmin", 0.0, "scale on random uniform bc")
-    flags.DEFINE_float("xmax", 20.0, "scale on random uniform bc")
+    flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
     flags.DEFINE_float("ymin", 0.0, "scale on random uniform bc")
-    flags.DEFINE_float("ymax", 20.0, "scale on random uniform bc")
+    flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
     flags.DEFINE_integer("max_holes", 1, "scale on random uniform bc")
     flags.DEFINE_float("max_hole_size", 2.0, "scale on random uniform bc")
     flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
@@ -73,10 +73,11 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 @partial(jax.jit, static_argnums=(0,))
 def loss_top_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    g_z = -5.
+    g_x = bc_params[0]
+    g_y = bc_params[1]
     sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_top)
     normal = np.array([0., 1.])
-    err = jax.vmap(lambda x: np.matmul(x, normal) - g_z * np.array([1.0, 0.0]))(sigma)
+    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([g_x, g_y]))(sigma)
     err = err**2
     return err
 
@@ -102,7 +103,6 @@ def loss_right_fn(field_fn, points_on_right, params):
     err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
     err = err ** 2
     return err
-
 
 
 def loss_in_hole_fn(field_fn, points_on_holes, params):
@@ -204,11 +204,10 @@ def sample_params(key):
     k6 = k6 * FLAGS.vary_geometry
     k7 = k7 * FLAGS.vary_geometry
 
-
     source_params = jax.random.uniform(k1, shape=(2,), minval=1 / 4, maxval=3.0 / 4)
 
     bc_params = FLAGS.bc_scale * jax.random.uniform(
-        k2, minval=-1.0, maxval=1.0, shape=(2,)
+        k2, minval=-5.0, maxval=5.0, shape=(2,)
     )
 
     if not FLAGS.max_holes > 0:
@@ -333,7 +332,7 @@ def sample_points_on_pores(key, n, params):
     x = xy[0] + r0 * np.cos(thetas)
     y = xy[1] + r0 * np.sin(thetas)
 
-    return np.concatenate([x[:, None], y[:, None]], axis= 1)
+    return np.concatenate([x[:, None], y[:, None]], axis=1)
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -431,9 +430,10 @@ def plot_solution(u, params):
         u,
         #mode="displacement",
     )
-    cb = plt.colorbar(c, shrink=.8)
-    cb.set_label('Displacement', size=6, c='b')
-    cb.ax.tick_params(labelsize=6, color='blue')
+    #cb = plt.colorbar(c, shrink=.8)
+    #cb.set_label('Displacement', size=6, c='b')
+    #cb.ax.tick_params(labelsize=6, color='blue')
+
 
 def main(argv):
     print("non-flag arguments:", argv)
