@@ -45,8 +45,8 @@ def epsilon_fn(x, field_fn):
 
 def sigma_fn(x, field_fn):
     epsilon = epsilon_fn(x, field_fn)
-    E = 100.
-    nu = 0
+    E = 200.
+    nu = 0.3
     lambda_ = E * nu / (1 + nu) / (1 - 2 * nu)
     mu = E / 2 / (1 + nu)
     sigma = lambda_ * np.trace(epsilon) * np.eye(2) + 2 * mu * epsilon
@@ -63,7 +63,7 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 
     rho = 1.0
     b_z = -10.
-    rhs = np.array([0, b_z*rho])
+    rhs = np.array([0.0, b_z*rho])
 
     err = (lhs + rhs)**2
 
@@ -76,7 +76,7 @@ def loss_top_fn(field_fn, points_on_top, params):
     g_z = -5.
     sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_top)
     normal = np.array([0., 1.])
-    err = jax.vmap(lambda x: np.matmul(x, normal) - g_z * np.array([1, 1]))(sigma)
+    err = jax.vmap(lambda x: np.matmul(x, normal) - g_z * np.array([1.0, 0.0]))(sigma)
     err = err**2
     return err
 
@@ -89,7 +89,7 @@ def loss_bottom_fn(field_fn, points_on_bottom, params):
 def loss_left_fn(field_fn, points_on_left, params):
     source_params, bc_params, per_hole_params, n_holes = params
     sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_left)
-    normal = np.array([0., -1.])
+    normal = np.array([-1., 0.])
     err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
     err = err ** 2
     return err
@@ -98,8 +98,64 @@ def loss_left_fn(field_fn, points_on_left, params):
 def loss_right_fn(field_fn, points_on_right, params):
     source_params, bc_params, per_hole_params, n_holes = params
     sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_right)
-    normal = np.array([0., 1.])
+    normal = np.array([1., 0.])
     err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
+    err = err ** 2
+    return err
+
+
+
+def loss_in_hole_fn(field_fn, points_on_holes, params):
+    source_params, bc_params, per_hole_params, n_holes = params
+    c, xy, size = per_hole_params
+
+    def parametrized_x(theta):
+        r0 = size * (1.0 + c[0] * np.cos(4 * theta) + c[1] * np.cos(8 * theta))
+        x = xy[0] + r0 * np.cos(theta)
+        return x.squeeze()
+
+    def parametrized_y(theta):
+        r0 = size * (1.0 + c[0] * np.cos(4 * theta) + c[1] * np.cos(8 * theta))
+        y = xy[1] + r0 * np.sin(theta)
+        return y.squeeze()
+
+    def find_normal_vec(theta):
+        norm_x_fn = jax.grad(parametrized_x)
+        norm_y_fn = jax.grad(parametrized_y)
+
+        dx_dtheta = norm_x_fn(theta)
+        dy_dtheta = norm_y_fn(theta)
+
+        slope = dy_dtheta / dx_dtheta
+        norm_slope = -1. / slope
+
+        u = 1
+        v = norm_slope
+        n = np.linalg.norm([u, v])
+        u /= n
+        v /= n
+
+        return u, v
+
+    vmap_find_normal_vec = jax.vmap(find_normal_vec)
+
+    cos_thetas = points_on_holes[:, 0] - xy[0]
+    sin_thetas = points_on_holes[:, 1] - xy[1]
+    tan_thetas = sin_thetas / cos_thetas
+    thetas = np.arctan(tan_thetas)
+
+    thetas = (jax.vmap(lambda cos_theta, theta:
+                     jax.lax.cond(
+                         cos_theta > 0, lambda x: x, lambda x: x - np.pi * np.sign(x), theta
+                     )
+                     )(cos_thetas, thetas)).flatten()
+
+    u, v = vmap_find_normal_vec(thetas)
+    normal = np.stack((u, v)).transpose()
+
+    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_holes)
+
+    err = jax.vmap(lambda x, y: np.matmul(x, y) - np.array([0, 0]), in_axes=(0, 0))(sigma, normal)
     err = err ** 2
     return err
 
@@ -113,13 +169,14 @@ def loss_fn(field_fn, points, params):
         points_on_holes,
         points_in_domain,
     ) = points
-    points_in_domain = np.concatenate([points_in_domain, points_on_holes])
+    #points_in_domain = np.concatenate([points_in_domain, points_on_holes])
     return (
         {
             "loss_top": np.mean(loss_top_fn(field_fn, points_on_top, params)),
-            "loss_bottom": np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
+            "loss_bottom": 250. * np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
             "loss_left": np.mean(loss_left_fn(field_fn, points_on_left, params)),
             "loss_right": np.mean(loss_right_fn(field_fn, points_on_right, params)),
+            "loss_hole": 0.0001 * np.mean(loss_in_hole_fn(field_fn, points_on_holes, params)),
         },
         {
             "loss_domain": np.mean(loss_domain_fn(field_fn, points_in_domain, params)),
@@ -272,7 +329,7 @@ def sample_points_on_pores(key, n, params):
         key, minval=0.0, maxval=1.0, shape=(n,)
     ) * 2 * np.pi
 
-    r0 = size * (1.0 + c[0] * np.cos(4 * thetas) + c[2] * np.cos(8 * thetas))
+    r0 = size * (1.0 + c[0] * np.cos(4 * thetas) + c[1] * np.cos(8 * thetas))
     x = xy[0] + r0 * np.cos(thetas)
     y = xy[1] + r0 * np.sin(thetas)
 

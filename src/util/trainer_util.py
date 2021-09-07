@@ -213,7 +213,7 @@ def compare_plots_with_ground_truth(
         ground_truth = fenics_functions[i]
         plt_inner_steps = min(max(inner_steps, 1), 5)
         plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + i)
-        plt.axis("off")
+        #plt.axis("off")
         plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
         plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
         ground_truth.set_allow_extrapolation(False)
@@ -263,10 +263,10 @@ def compare_plots_with_ground_truth(
             pde.plot_solution(u_approx, params_list[i])
             if (i == 0) and (j == 0):
                 plt.title("NN Model", fontsize=4)
-                plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
                 plt.ylabel(f"Step {step}", fontsize=4)
             elif i == 0:
-                plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
                 plt.ylabel(f"Step {step}", fontsize=4)
             else:
                 plt.axis("off")

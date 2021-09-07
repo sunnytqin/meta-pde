@@ -94,8 +94,8 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     rho = fa.Constant(1.0)
 
     # Young's modulus and Poisson's ratio
-    E = 100.
-    nu = 0
+    E = 200.
+    nu = 0.3
 
     # Lame's constants
     lambda_ = E * nu / (1 + nu) / (1 - 2 * nu)
@@ -104,7 +104,7 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     # Load
     g_z = -5.
     b_z = -10.
-    g = fa.Constant((g_z, g_z))
+    g = fa.Constant((g_z, 0.0))
     b = fa.Constant((0.0, b_z))
 
     # Definition of Neumann condition domain
