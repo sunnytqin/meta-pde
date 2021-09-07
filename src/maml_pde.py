@@ -143,18 +143,22 @@ def main(arvg):
     else:
         _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
-    for k, v in init_params.items():
-        if type(v) is not dict:
-            print(f"-> {k}: {v.shape}")
-        else:
-            print(f"-> {k}")
-            for k2, v2 in v.items():
-                if type(v2) is not dict:
-                    print(f"  -> {k2}: {v2.shape}")
-                else:
-                    print(f"  -> {k2}")
-                    for k3, v3 in v2.items():
-                        print(f"    -> {k3}: {v3.shape}")
+    log(
+        'NN model:', jax.tree_map(lambda x: x.shape, init_params)
+    )
+
+    #for k, v in init_params.items():
+    #    if type(v) is not dict:
+    #        print(f"-> {k}: {v.shape}")
+    #    else:
+    #        print(f"-> {k}")
+    #        for k2, v2 in v.items():
+    #            if type(v2) is not dict:
+    #                print(f"  -> {k2}: {v2.shape}")
+    #            else:
+    #                print(f"  -> {k2}")
+    #                for k3, v3 in v2.items():
+    #                    print(f"    -> {k3}: {v3.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -281,7 +285,14 @@ def main(arvg):
 
         if np.isnan(np.mean(meta_losses[0])):
             log("encountered nan at at step {}".format(step))
+            # save final model
+            bytes_output = flax.serialization.to_bytes(optimizer_target_prev)
+            f = open(os.path.join(path, "maml_step_final.txt".format(step)), "wb")
+            f.write(bytes_output)
+            f.close()
             break
+
+        optimizer_target_prev = (optimizer.target).copy()
 
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
@@ -463,12 +474,18 @@ def main(arvg):
                 gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
                 pde.build_gif(tmp_filenames, outfile=gif_out)
 
+            # save model
+            bytes_output = flax.serialization.to_bytes(optimizer.target)
+            f = open(os.path.join(path, "maml_step_{}.txt".format(step)), "wb")
+            f.write(bytes_output)
+            f.close()
+
     #if FLAGS.expt_name is not None:
     #    outfile.close()
 
     plt.figure()
     trainer_util.compare_plots_with_ground_truth(
-        (optimizer.target, inner_lrs),
+        (optimizer_target_prev, inner_lrs),
         pde,
         fenics_functions,
         gt_params,
@@ -483,7 +500,7 @@ def main(arvg):
 
     if FLAGS.pde == 'td_burgers':
         tmp_filenames = trainer_util.plot_model_time_series(
-            (optimizer.target, inner_lrs),
+            (optimizer_target_prev, inner_lrs),
             pde,
             fenics_functions,
             gt_params,

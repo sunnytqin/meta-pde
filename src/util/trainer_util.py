@@ -213,9 +213,11 @@ def compare_plots_with_ground_truth(
         ground_truth = fenics_functions[i]
         plt_inner_steps = min(max(inner_steps, 1), 5)
         plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + i)
-        #plt.axis("off")
-        plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
-        plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
+        plt.axis("off")
+        plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
+                  FLAGS.xmax * 1.1])
+        plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
+                  FLAGS.ymax * 1.1])
         ground_truth.set_allow_extrapolation(False)
         pde.plot_solution(ground_truth, params_list[i])
         if i == 0:
@@ -350,7 +352,8 @@ def prepare_logging(out_dir, expt_name):
             os.mkdir(out_dir)
         path = os.path.join(out_dir, expt_name)
         if os.path.exists(path):
-            shutil.rmtree(path)
+            #shutil.rmtree(path)
+            pass
         if not os.path.exists(path):
             os.mkdir(path)
 

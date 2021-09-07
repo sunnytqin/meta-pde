@@ -180,18 +180,18 @@ def main(argv):
 
     #pdb.set_trace()
 
-    #for res in test_resolutions:
-    #    log("res: {}, rel_mse: {}, std_rel_mse: {}, per_dim_rel_mse: {}, t_rel_sq_err: {}, time: {}".format(
-    #        res,
-    #        #np.mean(errs[res][0]/errs[res][1]),
-    #        (errs[res][2]).astype(float),
-    #        (errs[res][3]).astype(float),
-    #        npo.array(errs[res][4]),
-    #        npo.array(errs[res][5]),
-    #        #np.std(np.mean(errs[res][0]/errs[res][1], axis=(1,2))),
-    #        times[res]
-    #    ))
-    #    # errs = (err ** 2, gt_normalizer, rel_err, rel_err_std, per_dim_rel_err)
+    for res in test_resolutions:
+        log("res: {}, mse: {}, rel_mse: {}, std_rel_mse: {}, per_dim_rel_mse: {}, t_rel_sq_err: {}, time: {}".format(
+            res,
+            (errs[res][0]).astype(float),
+            (errs[res][2]).astype(float),
+            (errs[res][4]).astype(float),
+            npo.array(errs[res][3]),
+            npo.array(errs[res][5]),
+            times[res]
+        ))
+
+        # errs = (err ** 2, gt_normalizer, rel_err, rel_err_std, per_dim_rel_err)
 
     #pdb.set_trace()
 

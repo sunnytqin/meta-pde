@@ -428,7 +428,7 @@ def plot_solution(u, params):
     _, _, per_hole_params, num_holes = params
     c = fa.plot(
         u,
-        #mode="displacement",
+        mode="displacement",
     )
     #cb = plt.colorbar(c, shrink=.8)
     #cb.set_label('Displacement', size=6, c='b')

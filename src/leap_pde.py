@@ -392,6 +392,12 @@ def main(argv):
                 gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
                 pde.build_gif(tmp_filenames, outfile=gif_out)
 
+            # save model
+            bytes_output = flax.serialization.to_bytes(optimizer.target)
+            f = open(os.path.join(path, "leap_step_{}.txt".format(step)), "wb")
+            f.write(bytes_output)
+            f.close()
+
     #if FLAGS.expt_name is not None:
     #    outfile.close()
 
