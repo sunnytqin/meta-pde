@@ -5,6 +5,7 @@ from jax.config import config
 import jax
 import jax.numpy as np
 import numpy as npo
+import re
 from jax import grad, jit, vmap
 
 from jax.experimental import optimizers
@@ -63,11 +64,17 @@ def main(arvg):
     if FLAGS.out_dir is None:
         FLAGS.out_dir = FLAGS.pde + "_maml_results"
 
+    if FLAGS.load_model_from_expt is not None:
+        FLAGS.out_dir = os.path.join(FLAGS.out_dir, 'rerun')
+
     pde = get_pde(FLAGS.pde)
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
 
     log(FLAGS.flags_into_string())
+
+    with open(os.path.join(path, "flags_config.txt"), "w") as f:
+        f.write(FLAGS.flags_into_string())
 
     # --------------------- Defining the meta-training algorithm --------------------
 
@@ -103,7 +110,6 @@ def main(arvg):
     def make_task_loss_fns(key):
         # The input key is terminal
         params = pde.sample_params(key)
-
         def inner_loss(key, field_fn, params=params):
             inner_points = pde.sample_points(key, FLAGS.inner_points, params)
             return loss_fn(field_fn, inner_points, params)
@@ -142,6 +148,23 @@ def main(arvg):
         _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
     else:
         _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+
+    if FLAGS.load_model_from_expt is not None:
+        model_dir = FLAGS.pde + "_maml_results"
+        model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
+        model_file = npo.array(
+            [f for f in os.listdir(model_path) if "maml_step" in f]
+        )
+        steps = npo.zeros_like(model_file, dtype=int)
+        for i, f in enumerate(model_file):
+            steps[i] = re.findall('[0-9]+', f)[-1]
+        model_file = model_file[
+            np.argsort(steps)[-1]
+        ]
+        log('load pre-trained model from file: ', model_file)
+        with open(os.path.join(model_path, model_file), 'r') as f:
+            optimizer_target_prev = f.read()
+        init_params = flax.serialization.from_state_dict(init_params, optimizer_target_prev)
 
     log(
         'NN model:', jax.tree_map(lambda x: x.shape, init_params)
@@ -286,13 +309,9 @@ def main(arvg):
         if np.isnan(np.mean(meta_losses[0])):
             log("encountered nan at at step {}".format(step))
             # save final model
-            bytes_output = flax.serialization.to_bytes(optimizer_target_prev)
-            f = open(os.path.join(path, "maml_step_final.txt".format(step)), "wb")
-            f.write(bytes_output)
-            f.close()
+            with open(os.path.join(path, "maml_step_final.txt".format(step)), "w") as f:
+                f.write(optimizer_target_prev)
             break
-
-        optimizer_target_prev = (optimizer.target).copy()
 
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
@@ -306,6 +325,8 @@ def main(arvg):
             val_losses, val_meta_losses = validation_losses(
                 (optimizer.target, inner_lrs)
             )
+
+            optimizer_target_prev = flax.serialization.to_state_dict(optimizer.target)
 
             if FLAGS.pde == 'td_burgers' and len(early_stopping_tracker) == 3:
                 val_loss = np.mean(val_meta_losses[0])
@@ -475,10 +496,8 @@ def main(arvg):
                 pde.build_gif(tmp_filenames, outfile=gif_out)
 
             # save model
-            bytes_output = flax.serialization.to_bytes(optimizer.target)
-            f = open(os.path.join(path, "maml_step_{}.txt".format(step)), "wb")
-            f.write(bytes_output)
-            f.close()
+            with open(os.path.join(path, "maml_step_{}.txt".format(step)), "w") as f:
+                f.write(optimizer_target_prev)
 
     #if FLAGS.expt_name is not None:
     #    outfile.close()

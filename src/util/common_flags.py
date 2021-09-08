@@ -87,3 +87,6 @@ flags.DEFINE_float("annealing_alpha", 0.9, "annealing smoothing param")
 
 flags.DEFINE_boolean("pcgrad", False, "perform PC grad")
 flags.DEFINE_float("pcgrad_norm", 1.0, "PC grad multiplier")
+
+# Testing
+flags.DEFINE_string("load_model_from_expt", None, "load pre-trained model")

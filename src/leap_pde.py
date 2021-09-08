@@ -4,6 +4,7 @@ from jax.config import config
 import jax
 import jax.numpy as np
 import numpy as npo
+import re
 from jax import grad, jit, vmap
 
 from jax.experimental import optimizers
@@ -58,11 +59,17 @@ def main(argv):
     if FLAGS.out_dir is None:
         FLAGS.out_dir = FLAGS.pde + "_leap_results"
 
+    if FLAGS.load_model_from_expt is not None:
+        FLAGS.out_dir = os.path.join(FLAGS.out_dir, 'rerun')
+
     pde = get_pde(FLAGS.pde)
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
 
     log(FLAGS.flags_into_string())
+
+    with open(os.path.join(path, "flags_config.txt"), "w") as f:
+        f.write(FLAGS.flags_into_string())
 
     # --------------------- Defining the meta-training algorithm --------------------
 
@@ -135,19 +142,39 @@ def main(argv):
     else:
         _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
+    if FLAGS.load_model_from_expt is not None:
+        model_dir = FLAGS.pde + "_leap_results"
+        model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
+        model_file = npo.array(
+            [f for f in os.listdir(model_path) if "leap_step" in f]
+        )
+        steps = npo.zeros_like(model_file, dtype=int)
+        for i, f in enumerate(model_file):
+            steps[i] = re.findall('[0-9]+', f)[-1]
+        model_file = model_file[
+            np.argsort(steps)[-1]
+        ]
+        log('load pre-trained model from file: ', model_file)
+        with open(os.path.join(model_path, model_file), 'r') as f:
+            optimizer_target_prev = f.read()
+        init_params = flax.serialization.from_state_dict(init_params, optimizer_target_prev)
 
-    for k, v in init_params.items():
-        if type(v) is not dict:
-            print(f"-> {k}: {v.shape}")
-        else:
-            print(f"-> {k}")
-            for k2, v2 in v.items():
-                if type(v2) is not dict:
-                    print(f"  -> {k2}: {v2.shape}")
-                else:
-                    print(f"  -> {k2}")
-                    for k3, v3 in v2.items():
-                        print(f"    -> {k3}: {v3.shape}")
+    log(
+        'NN model:', jax.tree_map(lambda x: x.shape, init_params)
+    )
+
+    #for k, v in init_params.items():
+    #    if type(v) is not dict:
+    #        print(f"-> {k}: {v.shape}")
+    #    else:
+    #        print(f"-> {k}")
+    #        for k2, v2 in v.items():
+    #            if type(v2) is not dict:
+    #                print(f"  -> {k2}: {v2.shape}")
+    #            else:
+    #                print(f"  -> {k2}")
+    #                for k3, v3 in v2.items():
+    #                    print(f"    -> {k3}: {v3.shape}")
 
     optimizer = trainer_util.get_optimizer(Field, init_params)
 
@@ -240,6 +267,13 @@ def main(argv):
         with Timer() as t:
             optimizer, losses, meta_grad_norm = train_step(subkey, optimizer)
 
+        if np.isnan(np.mean(losses[0][:, -1])):
+            log("encountered nan at at step {}".format(step))
+            # save final model
+            with open(os.path.join(path, "leap_step_final.txt".format(step)), "w") as f:
+                f.write(optimizer_target_prev)
+            break
+
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
                 mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = trainer_util.vmap_validation_error(
@@ -250,6 +284,8 @@ def main(argv):
             deployment_time = deploy_timer.interval / FLAGS.n_eval
 
             val_losses = validation_losses(optimizer.target)
+
+            optimizer_target_prev = flax.serialization.to_state_dict(optimizer.target)
 
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
@@ -393,10 +429,8 @@ def main(argv):
                 pde.build_gif(tmp_filenames, outfile=gif_out)
 
             # save model
-            bytes_output = flax.serialization.to_bytes(optimizer.target)
-            f = open(os.path.join(path, "leap_step_{}.txt".format(step)), "wb")
-            f.write(bytes_output)
-            f.close()
+            with open(os.path.join(path, "leap_step_{}.txt".format(step)), "w") as f:
+                f.write(optimizer_target_prev)
 
     #if FLAGS.expt_name is not None:
     #    outfile.close()

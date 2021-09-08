@@ -352,8 +352,7 @@ def prepare_logging(out_dir, expt_name):
             os.mkdir(out_dir)
         path = os.path.join(out_dir, expt_name)
         if os.path.exists(path):
-            #shutil.rmtree(path)
-            pass
+            shutil.rmtree(path)
         if not os.path.exists(path):
             os.mkdir(path)
 
