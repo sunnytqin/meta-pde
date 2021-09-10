@@ -5,6 +5,7 @@ from .stokes import pfreestokes_def
 #from .burgers import burgers_def
 from .burgers import td_burgers_def
 from .elasticity import elasticity_def
+from .elasticity import hyper_elasticity_def
 
 
 FLAGS = flags.FLAGS
@@ -41,6 +42,10 @@ def get_pde(pde_name):
     elif pde_name == "elasticity":
         FLAGS.domain_loss = "loss_domain"
         return elasticity_def
+
+    elif pde_name == "hyper_elasticity":
+        FLAGS.domain_loss = "loss_domain"
+        return hyper_elasticity_def
 
     else:
         raise Exception("Invalid PDE {}".format(pde_name))

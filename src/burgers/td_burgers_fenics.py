@@ -121,7 +121,7 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         u_list.append(u.copy(deepcopy=True))
         t_list.append(FLAGS.tmin + dt * n)
     solved = read_fenics_solution(cache, u_list)
-    reuse = True
+    reuse = False
     if solved and reuse:
         return GroundTruth(u_list, np.array(t_list))
 

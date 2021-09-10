@@ -1,7 +1,8 @@
 """
-    Solve the linear Stokes equation using fenics
+    Solve the hyper elasticity equation using fenics
 
-    PDE: https://fenicsproject.org/olddocs/dolfin/1.3.0/python/demo/documented/stokes-iterative/python/documentation.html
+    PDE: http://www-personal.umich.edu/~chrismav/FEniCS.pdf
+    page 14
 """
 
 import fenics as fa
@@ -59,7 +60,7 @@ def make_domain(c1, c2, n_points, x0, y0, size):
         pdb.set_trace()
 
 
-def solve_fenics(params, boundary_points=32, resolution=32):
+def solve_fenics(params, boundary_points=64, resolution=1):
     print("solving with params ", params)
     print("resolution ", resolution)
     domain = mshr.Rectangle(
@@ -80,70 +81,92 @@ def solve_fenics(params, boundary_points=32, resolution=32):
     mesh = mshr.generate_mesh(domain, resolution)
 
     def bottom(x, on_boundary):
-        return (on_boundary and fa.near(x[1], FLAGS.xmin))
+        return on_boundary and fa.near(x[1], FLAGS.xmin)
 
-    # Strain function
-    def epsilon(u):
-        return fa.sym(fa.grad(u))
+    # Define Dirichlet boundary (y = 0)
+    c = fa.Constant(("0.0", "0.0"))
 
-    # Stress function
-    def sigma(u):
-        return lambda_ * fa.div(u) * fa.Identity(2) + 2 * mu * epsilon(u)
+    V = fa.VectorFunctionSpace(mesh, "Lagrange", 1)
 
-    # Density
-    rho = fa.Constant(1.0)
+    bc_bottom = fa.DirichletBC(V, c, bottom)
+    bcs = [bc_bottom]
 
-    # Young's modulus and Poisson's ratio
-    E = 200.
-    nu = 0.3
+    # Define functions
+    du = fa.TrialFunction(V)  # Incremental displacement
+    v = fa.TestFunction(V)  # Test function
+    u = fa.Function(V)  # Displacement from previous iteration
+    B = fa.Constant((0.0, -0.5))  # Body force per unit volume
+    T = fa.Constant((0.0, 0.0))  # Traction force on the boundary
 
-    # Lame's constants
-    lambda_ = E * nu / (1 + nu) / (1 - 2 * nu)
-    mu = E / 2 / (1 + nu)
+    # Kinematics
+    d = u.geometric_dimension()
+    I = fa.Identity(d)  # Identity tensor
+    F = I + fa.grad(u)  # Deformation gradient
+    C = F.T * F  # Right Cauchy-Green tensor
 
-    # Load
-    g_x = bc_params[0]
-    g_y = bc_params[1]
-    b_z = -10.
-    g = fa.Constant((g_x, g_y))
-    b = fa.Constant((0.0, b_z * rho))
+    # Invariants of deformation tensors
+    Ic = fa.tr(C)
+    J = fa.det(F)
+    Jinv = J ** (-2/d)
 
-    # Definition of Neumann condition domain
-    boundaries = fa.MeshFunction("size_t", mesh, mesh.topology().dim() - 1)
-    boundaries.set_all(0)
+    young_mod = 1.0
+    poisson_ratio = 0.49
 
-    top = fa.AutoSubDomain(lambda x: fa.near(x[1], FLAGS.ymax))
+    shear_mod = young_mod / (2 * (1 + poisson_ratio))
+    bulk_mod = young_mod / (3 * (1 - 2 * poisson_ratio))
 
-    top.mark(boundaries, 1)
-    ds = fa.ds(subdomain_data=boundaries)
+    # Elasticity parameters
+    #E, nu = 10.0, 0.3
+    #mu, lmbda = fa.Constant(E / (2 * (1 + nu))), fa.Constant(E * nu / ((1 + nu) * (1 - 2 * nu)))
 
-    V = fa.VectorFunctionSpace(mesh, "CG", 1)
-    u = fa.TrialFunction(V)
-    v = fa.TestFunction(V)
+    # Stored strain energy density (compressible neo-Hookean model)
+    psi = (shear_mod / 2) * (Jinv * Ic - d) + (bulk_mod / 2) * (J - 1) ** 2
 
-    bc = fa.DirichletBC(V, fa.Constant((0.0, 0.0)), bottom)
+    # Total potential energy
+    Pi = psi * fa.dx - fa.dot(B, u) * fa.dx - fa.dot(T, u) * fa.ds
 
-    a = fa.inner(sigma(u), epsilon(v)) * fa.dx
-    l = rho * fa.dot(b, v) * fa.dx + fa.inner(g, v) * ds(1)
+    # Compute first variation of Pi (directional derivative about u in the direction of v)
+    F = fa.derivative(Pi, u, v)
 
-    u = fa.Function(V)
-    A_ass, L_ass = fa.assemble_system(a, l, bc)
+    # Compute Jacobian of F
+    J = fa.derivative(F, u, du)
 
-    solver_parameters = {
-        "newton_solver": {
-            "maximum_iterations": 500,
-            "linear_solver": "mumps",
-            "relaxation_parameter": FLAGS.relaxation_parameter,
-        }}
+    fa.parameters["form_compiler"]["cpp_optimize"] = True
+    ffc_options = {"optimize": True,
+                   "eliminate_zeros": True,
+                   "precompute_basis_const": True,
+                   "precompute_ip_const": True}
+
+    newton_args = {
+        "maximum_iterations": 5000,
+        "linear_solver": "petsc",
+        "relaxation_parameter": 0.001,
+        "relative_tolerance": 5e-3,
+        "absolute_tolerance": 5e-3
+        }
+    snes_args = {
+        "method": "qn",
+        "linear_solver": "petsc",
+        "maximum_iterations": 1000,
+    }
+    solver_args = {
+        "nonlinear_solver": "newton",
+        "newton_solver": newton_args,
+        "snes_solver": snes_args,
+    }
 
     try:
-        fa.solve(a == l, u, bc)
+        # Solve variational problem
+        fa.solve(F == 0, u, bcs, J=J,
+                 form_compiler_parameters=ffc_options,
+                 solver_parameters=solver_args)
     except Exception as e:
         print("Failed solve: ", e)
         print("Failed on params: ", params)
-        solver_parameters['newton_solver']['relaxation_parameter'] *= 0.2
-        fa.solve(a == l, u, bc, solver_parameters=solver_parameters)
-
+        solver_args['newton_solver']['relaxation_parameter'] *= 0.2
+        fa.solve(F == 0, u, bcs, J=J,
+                 form_compiler_parameters=ffc_options,
+                 solver_parameters=solver_args)
     return u
 
 

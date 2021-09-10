@@ -138,22 +138,22 @@ def main(argv):
                 boundary_points=int(FLAGS.boundary_resolution_factor * res),
             )
 
-        plt.figure(figsize=(5, 5))
-        fa.plot(test_fns[0].function_space().mesh())
+        #plt.figure(figsize=(5, 5))
+        #fa.plot(test_fns[0].function_space().mesh())
 
-        u, p = test_fns[0].split()
-        plt.figure(figsize=(9, 3))
-        clrs = fa.plot(u)
-        plt.colorbar(clrs)
+        #u, p = test_fns[0].split()
+        #plt.figure(figsize=(9, 3))
+        #clrs = fa.plot(u)
+        #plt.colorbar(clrs)
 
-        plt.figure(figsize=(9, 3))
-        fa.plot(u)
+        #plt.figure(figsize=(9, 3))
+        #fa.plot(u)
         #plt.show()
 
-        #plt.figure(figsize=(5, 5))
+        plt.figure(figsize=(5, 5))
         #print('test_fn', type(test_fns[0]))
-        #fa.plot(test_fns[0])
-        #lt.show()
+        fa.plot(test_fns[0])
+        plt.show()
         #assert np.allclose(test_coords, coords)
 
         mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = validation_error(test_vals, gt_vals)
