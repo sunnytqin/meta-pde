@@ -260,7 +260,7 @@ def main(argv):
 
         # perform PC grad
         if FLAGS.pcgrad:
-            assert False
+            #assert False
             # place holder for new total loss gradient
             #total_grad_new = [np.zeros_like(x)
             #                  for x in jax.tree_flatten(loss_grad)[0]]

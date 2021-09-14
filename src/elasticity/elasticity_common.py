@@ -430,9 +430,9 @@ def plot_solution(u, params):
         u,
         mode="displacement",
     )
-    #cb = plt.colorbar(c, shrink=.8)
-    #cb.set_label('Displacement', size=6, c='b')
-    #cb.ax.tick_params(labelsize=6, color='blue')
+    cb = plt.colorbar(c, shrink=.8)
+    cb.set_label('Displacement', size=6, c='b')
+    cb.ax.tick_params(labelsize=6, color='blue')
 
 
 def main(argv):

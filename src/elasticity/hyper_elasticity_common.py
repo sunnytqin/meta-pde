@@ -75,30 +75,40 @@ def loss_domain_fn(field_fn, points_in_domain, params):
     return err
 
 
-@partial(jax.jit, static_argnums=(0,))
+#@partial(jax.jit, static_argnums=(0,))
+#def loss_top_fn(field_fn, points_on_top, params):
+#    source_params, bc_params, per_hole_params, n_holes = params
+#    #g_x = bc_params[0]
+#    #g_y = bc_params[1]
+#    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_top)
+#    normal = np.array([0., 1.])
+#    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
+#    err = err**2
+#    return err
+
 def loss_top_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    g_x = bc_params[0]
-    g_y = bc_params[1]
-    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_top)
-    normal = np.array([0., 1.])
-    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([g_x, g_y]))(sigma)
-    err = err**2
-    return err
-
+    return (field_fn(points_on_top) - np.array([0., -0.2]))** 2
 
 def loss_bottom_fn(field_fn, points_on_bottom, params):
     source_params, bc_params, per_hole_params, n_holes = params
     return field_fn(points_on_bottom)** 2
 
 
-def loss_left_fn(field_fn, points_on_left, params):
+#def loss_left_fn(field_fn, points_on_left, params):
+#    source_params, bc_params, per_hole_params, n_holes = params
+#    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_left)
+#    normal = np.array([-1., 0.])
+#    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
+#    err = err ** 2
+#    return err
+
+@partial(jax.jit, static_argnums=(0,))
+def loss_left_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_left)
-    normal = np.array([-1., 0.])
-    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
-    err = err ** 2
-    return err
+    T = np.array([0.2, 0.])
+    err = jax.vmap(lambda x: np.dot(T, field_fn(x)))(points_on_top)
+    return -err
 
 
 def loss_right_fn(field_fn, points_on_right, params):
@@ -174,18 +184,19 @@ def loss_fn(field_fn, points, params):
         points_on_holes,
         points_in_domain,
     ) = points
-    points_in_domain = np.concatenate([points_in_domain,
-                                       points_on_holes,
-                                       points_on_top,
-                                       points_on_left,
-                                       points_on_right
-                                       ])
+    #points_in_domain = np.concatenate([points_in_domain,
+    #                                   points_on_holes,
+    #                                   points_on_left,
+    #                                   points_on_right
+    #                                   ])
     return (
         {
-            "loss_bottom": 5000. * np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
+            "loss_bottom": 8000. * np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
+            "loss_top": 8000. * np.mean(loss_top_fn(field_fn, points_on_top, params)),
         },
         {
             "loss_domain": np.sum(loss_domain_fn(field_fn, points_in_domain, params)),
+            #"loss_left": np.sum(loss_left_fn(field_fn, points_on_left, params)),
         },
     )
 
@@ -258,7 +269,7 @@ def sample_points(key, n, params):
     _, _, per_hole_params, n_holes = params
     k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
     ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
-    n_on_boundary = n // 2
+    n_on_boundary = n
     points_on_top = sample_points_top(k1, n_on_boundary, params)
     points_on_bottom = sample_points_bottom(k2, n_on_boundary, params)
     points_on_left = sample_points_left(k3, n_on_boundary, params)
@@ -292,8 +303,8 @@ def sample_points_top(key, n, params):
 def sample_points_bottom(key, n, params):
     _, _, _, _ = params
     bottom_x = np.linspace(FLAGS.xmin, FLAGS.xmax, n, endpoint=False) + jax.random.uniform(
-        key, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n, shape=(1,)
-    )
+            key, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n, shape=(1,)
+            )
     bottom = np.stack([bottom_x, FLAGS.ymin * np.ones(n)], axis=1)
     return bottom
 
@@ -436,9 +447,9 @@ def plot_solution(u, params):
         u,
         mode="displacement",
     )
-    #cb = plt.colorbar(c, shrink=.8)
-    #cb.set_label('Displacement', size=6, c='b')
-    #cb.ax.tick_params(labelsize=6, color='blue')
+    cb = plt.colorbar(c, shrink=.8)
+    cb.set_label('Displacement', size=6, c='b')
+    cb.ax.tick_params(labelsize=6, color='blue')
 
 
 def main(argv):

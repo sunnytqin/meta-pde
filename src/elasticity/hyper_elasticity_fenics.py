@@ -81,18 +81,30 @@ def solve_fenics(params, boundary_points=64, resolution=1):
     mesh = mshr.generate_mesh(domain, resolution)
 
     def bottom(x, on_boundary):
-        return on_boundary and fa.near(x[1], FLAGS.xmin)
+        return on_boundary and fa.near(x[1], FLAGS.ymin)
+
+    def top(x, on_boundary):
+        return on_boundary and fa.near(x[1], FLAGS.ymax)
 
     # Define Dirichlet boundary (y = 0)
-    c = fa.Constant(("0.0", "0.0"))
+    c_bottom = fa.Constant(("0.0", "0.0"))
+    c_top = fa.Constant(("0.0", "-0.2"))
 
     V = fa.VectorFunctionSpace(mesh, "Lagrange", 1)
 
-    bc_bottom = fa.DirichletBC(V, c, bottom)
-    bcs = [bc_bottom]
+    bc_bottom = fa.DirichletBC(V, c_bottom, bottom)
+    bc_top = fa.DirichletBC(V, c_top, top)
+    bcs = [bc_bottom, bc_top]
 
+    #boundaries = fa.MeshFunction("size_t", mesh, mesh.topology().dim() - 1)
+    #boundaries.set_all(0)
+    #left = fa.AutoSubDomain(lambda x: fa.near(x[0], FLAGS.xmin))
+    #left.mark(boundaries, 1)
+    #ds = fa.ds(subdomain_data=boundaries)
+
+    
     # Define functions
-    du = fa.TrialFunction(V)  # Incremental displacement
+    du = fa.TrialFunction(V)  # incremental displacement
     v = fa.TestFunction(V)  # Test function
     u = fa.Function(V)  # Displacement from previous iteration
     B = fa.Constant((0.0, -0.5))  # Body force per unit volume
@@ -123,7 +135,7 @@ def solve_fenics(params, boundary_points=64, resolution=1):
     psi = (shear_mod / 2) * (Jinv * Ic - d) + (bulk_mod / 2) * (J - 1) ** 2
 
     # Total potential energy
-    Pi = psi * fa.dx - fa.dot(B, u) * fa.dx - fa.dot(T, u) * fa.ds
+    Pi = psi * fa.dx - fa.dot(B, u) * fa.dx - fa.dot(T, u) * fa.ds #ds(1)
 
     # Compute first variation of Pi (directional derivative about u in the direction of v)
     F = fa.derivative(Pi, u, v)
@@ -138,9 +150,9 @@ def solve_fenics(params, boundary_points=64, resolution=1):
                    "precompute_ip_const": True}
 
     newton_args = {
-        "maximum_iterations": 5000,
+        "maximum_iterations": 20_000,
         "linear_solver": "petsc",
-        "relaxation_parameter": 0.001,
+        "relaxation_parameter": 0.01,
         "relative_tolerance": 5e-3,
         "absolute_tolerance": 5e-3
         }
