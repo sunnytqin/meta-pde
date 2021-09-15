@@ -13,10 +13,13 @@ import pdb
 import argparse
 import jax
 from collections import namedtuple
+import os
 
 from absl import app
 from absl import flags
 from ..util import common_flags
+from ..util.trainer_util import read_fenics_solution, save_fenics_solution
+
 
 FLAGS = flags.FLAGS
 
@@ -88,7 +91,7 @@ def solve_fenics(params, boundary_points=64, resolution=1):
 
     # Define Dirichlet boundary (y = 0)
     c_bottom = fa.Constant(("0.0", "0.0"))
-    c_top = fa.Constant(("0.0", "-0.2"))
+    c_top = fa.Constant(("0.0", "-0.1"))
 
     V = fa.VectorFunctionSpace(mesh, "Lagrange", 1)
 
@@ -121,7 +124,7 @@ def solve_fenics(params, boundary_points=64, resolution=1):
     J = fa.det(F)
     Jinv = J ** (-2/d)
 
-    young_mod = 1.0
+    young_mod = float(bc_params[0])
     poisson_ratio = 0.49
 
     shear_mod = young_mod / (2 * (1 + poisson_ratio))
@@ -142,6 +145,20 @@ def solve_fenics(params, boundary_points=64, resolution=1):
 
     # Compute Jacobian of F
     J = fa.derivative(F, u, du)
+
+    # generate cache data
+    cache = {
+        "hparams": (resolution,
+                    FLAGS.xmin, FLAGS.xmax,
+                    FLAGS.ymin, FLAGS.ymax,
+                    ),
+        "params": np.hstack(params),
+        "pde": "hyper_elasticity"
+    }
+    solved = read_fenics_solution(cache, u)
+    reuse = False # seg fault
+    if solved and reuse:
+        return u
 
     fa.parameters["form_compiler"]["cpp_optimize"] = True
     ffc_options = {"optimize": True,
@@ -179,6 +196,15 @@ def solve_fenics(params, boundary_points=64, resolution=1):
         fa.solve(F == 0, u, bcs, J=J,
                  form_compiler_parameters=ffc_options,
                  solver_parameters=solver_args)
+
+    if not solved:
+        path = save_fenics_solution(cache, u)
+
+        plt.figure(figsize=(9, 9))
+        clrs = fa.plot(u, mode='displacement')
+        plt.colorbar(clrs)
+        plt.savefig(os.path.join(path, 'hyper_elasticity.png'))
+
     return u
 
 

@@ -143,8 +143,8 @@ def read_fenics_solution(cache, fenics_function):
         suffix = None
         for suffix_i, cache_i in master_info.items():
             if (
-                    np.isclose(cache_i[0], cache['hparams']).all() and
-                    np.array([np.isclose(a, b).all() for a, b in zip(cache_i[1], cache['params'])]).all()
+                    npo.isclose(cache_i[0], cache['hparams']).all()
+                    and npo.array([npo.allclose(a, b) for a, b in zip(cache_i[1], cache['params'])]).all()
             ):
                 suffix = suffix_i
                 break
@@ -213,7 +213,8 @@ def compare_plots_with_ground_truth(
         ground_truth = fenics_functions[i]
         plt_inner_steps = min(max(inner_steps, 1), 5)
         plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + i)
-        #plt.axis("off")
+        if N > 1:
+            plt.axis("off")
         plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
                   FLAGS.xmax * 1.1])
         plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
@@ -225,9 +226,9 @@ def compare_plots_with_ground_truth(
         steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
         for j, step in enumerate(steps_plot): #range(0, inner_steps + 1):
             plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
-            plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
+            plt.xlim([min(FLAGS.xmin * 0.8, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.2),
                           FLAGS.xmax * 1.1])
-            plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
+            plt.ylim([min(FLAGS.ymin * 0.8, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.2),
                           FLAGS.ymax * 1.1])
 
             final_model = get_final_model(
@@ -267,11 +268,17 @@ def compare_plots_with_ground_truth(
             pde.plot_solution(u_approx, params_list[i])
             if (i == 0) and (j == 0):
                 plt.title("NN Model", fontsize=4)
-                plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
-                plt.ylabel(f"Step {step}", fontsize=4)
+                if N > 1:
+                    plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                    plt.ylabel(f"Step {step}", fontsize=4)
+                else:
+                    plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
             elif i == 0:
-                plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
-                plt.ylabel(f"Step {step}", fontsize=4)
+                if N > 1:
+                    plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                    plt.ylabel(f"Step {step}", fontsize=4)
+                else:
+                    plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
             else:
                 plt.axis("off")
 

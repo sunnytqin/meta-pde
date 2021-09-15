@@ -52,7 +52,8 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 
     def integrand(x, field_fn):
         # energy density
-        young_mod = 1.
+        #young_mod = bc_params[0].astype(float)
+        young_mod = 1.0
         poisson_ratio = 0.49
         d = 2
         shear_mod = young_mod / (2 * (1 + poisson_ratio))
@@ -88,7 +89,7 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 
 def loss_top_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
-    return (field_fn(points_on_top) - np.array([0., -0.2]))** 2
+    return (field_fn(points_on_top) - np.array([0., -0.1])) ** 2
 
 def loss_bottom_fn(field_fn, points_on_bottom, params):
     source_params, bc_params, per_hole_params, n_holes = params
@@ -224,7 +225,7 @@ def sample_params(key):
     source_params = jax.random.uniform(k1, shape=(2,), minval=1 / 4, maxval=3.0 / 4)
 
     bc_params = FLAGS.bc_scale * jax.random.uniform(
-        k2, minval=-5.0, maxval=5.0, shape=(2,)
+        k2, minval=0.5, maxval=1.5, shape=(2,)
     )
 
     if not FLAGS.max_holes > 0:
@@ -243,7 +244,7 @@ def sample_params(key):
 
     pore_sizes = jax.random.uniform(
         k6,
-        minval=0.8 * FLAGS.max_hole_size,
+        minval=0.2 * FLAGS.max_hole_size,
         maxval=FLAGS.max_hole_size,
         shape=(1,),
     )
