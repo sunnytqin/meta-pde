@@ -270,8 +270,8 @@ def main(argv):
         if np.isnan(np.mean(losses[0][:, -1])):
             log("encountered nan at at step {}".format(step))
             # save final model
-            with open(os.path.join(path, "leap_step_final.txt".format(step)), "w") as f:
-                f.write(optimizer_target_prev)
+            #with open(os.path.join(path, "leap_step_final.txt".format(step)), "w") as f:
+            #    f.write(optimizer_target_prev)
             break
 
         if step % FLAGS.log_every == 0:
@@ -285,7 +285,7 @@ def main(argv):
 
             val_losses = validation_losses(optimizer.target)
 
-            optimizer_target_prev = flax.serialization.to_state_dict(optimizer.target)
+            #optimizer_target_prev = flax.serialization.to_state_dict(optimizer.target)
 
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
@@ -429,8 +429,8 @@ def main(argv):
                 pde.build_gif(tmp_filenames, outfile=gif_out)
 
             # save model
-            with open(os.path.join(path, "leap_step_{}.txt".format(step)), "w") as f:
-                f.write(optimizer_target_prev)
+            #with open(os.path.join(path, "leap_step_{}.txt".format(step)), "w") as f:
+            #    f.write(optimizer_target_prev)
 
     #if FLAGS.expt_name is not None:
     #    outfile.close()

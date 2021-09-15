@@ -155,10 +155,10 @@ def solve_fenics(params, boundary_points=64, resolution=1):
         "params": np.hstack(params),
         "pde": "hyper_elasticity"
     }
-    solved = read_fenics_solution(cache, u)
-    reuse = False # seg fault
-    if solved and reuse:
-        return u
+    #solved = read_fenics_solution(cache, u)
+    #reuse = False # seg fault
+    #if solved and reuse:
+    #    return u
 
     fa.parameters["form_compiler"]["cpp_optimize"] = True
     ffc_options = {"optimize": True,
@@ -197,13 +197,13 @@ def solve_fenics(params, boundary_points=64, resolution=1):
                  form_compiler_parameters=ffc_options,
                  solver_parameters=solver_args)
 
-    if not solved:
-        path = save_fenics_solution(cache, u)
+    #if not solved:
+    #    path = save_fenics_solution(cache, u)
 
-        plt.figure(figsize=(9, 9))
-        clrs = fa.plot(u, mode='displacement')
-        plt.colorbar(clrs)
-        plt.savefig(os.path.join(path, 'hyper_elasticity.png'))
+    #    plt.figure(figsize=(9, 9))
+    #    clrs = fa.plot(u, mode='displacement')
+    #    plt.colorbar(clrs)
+    #    plt.savefig(os.path.join(path, 'hyper_elasticity.png'))
 
     return u
 
