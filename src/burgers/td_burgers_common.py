@@ -28,11 +28,11 @@ from ..util import common_flags
 
 FLAGS = flags.FLAGS
 flags.DEFINE_float("tmin", 0.0, "PDE initial time")
-flags.DEFINE_float("tmax", 0.5, "PDE final time")
+flags.DEFINE_float("tmax", 0.6, "PDE final time")
 flags.DEFINE_float("tmax_nn", -1., "PDE final time passed in for NN")
-flags.DEFINE_integer("num_tsteps", 5, "number of time steps for td_burgers")
+flags.DEFINE_integer("num_tsteps", 6, "number of time steps for td_burgers")
 flags.DEFINE_boolean("sample_time_random", True, "random time sample for NN")
-flags.DEFINE_float("max_reynolds", 1e3, "Reynolds number scale")
+flags.DEFINE_float("max_reynolds", 500, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
 flags.DEFINE_boolean("td_burger_impose_symmetry", True, "for bc param sampling")
 flags.DEFINE_integer("propagatetime_max", 20_000, "maximum iterations before propagate time step")
@@ -102,9 +102,9 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 def loss_vertical_fn(field_fn, points_on_vertical, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
-    A2 = (np.abs(bc_params[0, 2])).astype(float)
+    A0 = (bc_params[0, 0]).astype(float)
+    A1 = (bc_params[0, 1]).astype(float)
+    A2 = (bc_params[0, 2]).astype(float)
     sinusoidal_magnitude = A1 * \
                            np.cos(A2 * np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) *\
                            np.sin(A2 * np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -116,9 +116,9 @@ def loss_vertical_fn(field_fn, points_on_vertical, params):
 def loss_horizontal_fn(field_fn, points_on_horizontal, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
-    A2 = (np.abs(bc_params[0, 2])).astype(float)
+    A0 = (bc_params[0, 0]).astype(float)
+    A1 = (bc_params[0, 1]).astype(float)
+    A2 = (bc_params[0, 2]).astype(float)
     sinusoidal_magnitude = A0 * \
                            np.sin(A2 * np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
                            np.cos(A2 * np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -130,9 +130,9 @@ def loss_horizontal_fn(field_fn, points_on_horizontal, params):
 def loss_initial_fn(field_fn, points_initial, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
-    A2 = (np.abs(bc_params[0, 2])).astype(float)
+    A0 = (bc_params[0, 0]).astype(float)
+    A1 = (bc_params[0, 1]).astype(float)
+    A2 = (bc_params[0, 2]).astype(float)
     sinusoidal_magnitude_x = A0 * \
                              np.sin(A2 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
                              np.cos(A2 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -218,18 +218,28 @@ def sample_params(key):
     k6 = k6 * FLAGS.vary_geometry
     k7 = k7 * FLAGS.vary_geometry
 
-
     source_params = FLAGS.max_reynolds * jax.random.uniform(k1, shape=(1,), minval=0., maxval=1.)
 
     if FLAGS.td_burger_impose_symmetry:
-        bc_params = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=0.0, maxval=1.5, shape=(1, 1,)
+
+        bc_params_magnitude = FLAGS.bc_scale * jax.random.uniform(
+            k2, minval=1.0, maxval=3.0, shape=(1, 1,)
+        ) #* (2. * jax.random.bernoulli(k5, shape=(1, 1, )) - 1.)
+
+        bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
+            k2, minval=0.1, maxval=2.0, shape=(1, 1,)
         )
-        bc_params = np.concatenate([bc_params, bc_params, np.array([[1.]])], axis=1)
+
+        bc_params = np.concatenate([bc_params_magnitude, bc_params_magnitude, bc_params_scale], axis=1)
     else:
-        bc_params = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=0.0, maxval=1.5, shape=(1, 3,)
+        bc_params_magnitude = FLAGS.bc_scale * jax.random.uniform(
+            k2, minval=1.0, maxval=3.0, shape=(1, 2,)
+        ) #* (2. * jax.random.bernoulli(k5, shape=(1, 2, )) - 1.)
+
+        bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
+            k2, minval=0.1, maxval=2.0, shape=(1, 1,)
         )
+        bc_params = np.concatenate([bc_params_magnitude, bc_params_scale], axis=1)
 
     if not FLAGS.max_holes > 0:
         n_holes = 0
@@ -666,3 +676,5 @@ if __name__ == "__main__":
     flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
 
     app.run(main)
+
+

@@ -53,7 +53,7 @@ flags.DEFINE_float("inner_grad_clip", 1e14, "inner grad clipping")
 
 flags.DEFINE_integer("inner_steps", 10, "num_inner_steps")
 
-FLAGS.td_burger_impose_symmetry = False
+#FLAGS.td_burger_impose_symmetry = False
 
 def main(argv):
     if FLAGS.out_dir is None:

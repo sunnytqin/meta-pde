@@ -385,10 +385,10 @@ def main(argv):
     )
 
     if FLAGS.pde == 'td_burgers':
-        FLAGS.tmax_nn = 1e-4
-        early_stopping_tracker = deque()
-        propagate_time = False
-        last_prop_step = 0
+        #FLAGS.tmax_nn = 1e-4
+        #early_stopping_tracker = deque()
+        #propagate_time = False
+        #last_prop_step = 0
 
         t_list = []
         for i in range(FLAGS.num_tsteps):
@@ -421,14 +421,14 @@ def main(argv):
             optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, None)
 
         # increase NN domain every 100k steps or when we stop seeing val loss improvement
-        if (FLAGS.pde == 'td_burgers') and (propagate_time) and (FLAGS.tmax_nn < FLAGS.tmax):
-            FLAGS.tmax_nn += (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
-            FLAGS.tmax_nn = np.clip(FLAGS.tmax_nn, a_max=FLAGS.tmax).astype(float)
-            log(f"Passing new t max to NN: {FLAGS.tmax_nn}")
-            logging.info(f"Passing new t max to NN: {FLAGS.tmax_nn}")
-            last_prop_step = step
-            propagate_time = False
-            sys.stdout.flush()
+        #if (FLAGS.pde == 'td_burgers') and (propagate_time) and (FLAGS.tmax_nn < FLAGS.tmax):
+        #    FLAGS.tmax_nn += (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
+        #    FLAGS.tmax_nn = np.clip(FLAGS.tmax_nn, a_max=FLAGS.tmax).astype(float)
+        #    log(f"Passing new t max to NN: {FLAGS.tmax_nn}")
+        #    logging.info(f"Passing new t max to NN: {FLAGS.tmax_nn}")
+        #    last_prop_step = step
+        #    propagate_time = False
+        #    sys.stdout.flush()
 
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
@@ -541,15 +541,15 @@ def main(argv):
 
             val_loss = validation_losses(optimizer.target)
 
-            if FLAGS.pde == 'td_burgers' and len(early_stopping_tracker) == 3:
-                improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
-                _ = early_stopping_tracker.popleft()
-                if (improve_pct < FLAGS.propagatetime_rel) and (step - last_prop_step) >= (FLAGS.propagatetime_max // 2):
-                    propagate_time = True
-                elif (step - last_prop_step) >= FLAGS.propagatetime_max:
-                    propagate_time = True
-            if FLAGS.pde == 'td_burgers':
-                early_stopping_tracker.append(val_loss)
+            #if FLAGS.pde == 'td_burgers' and len(early_stopping_tracker) == 3:
+            #    improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
+            #    _ = early_stopping_tracker.popleft()
+            #    if (improve_pct < FLAGS.propagatetime_rel) and (step - last_prop_step) >= (FLAGS.propagatetime_max // 2):
+            #        propagate_time = True
+            #    elif (step - last_prop_step) >= FLAGS.propagatetime_max:
+            #        propagate_time = True
+            #if FLAGS.pde == 'td_burgers':
+            #    early_stopping_tracker.append(val_loss)
 
         # if step % FLAGS.log_every == 0:
             if step > 0:
@@ -654,10 +654,10 @@ def main(argv):
                 pde.build_gif(tmp_filenames, outfile=gif_out)
 
             # save model
-            bytes_output = flax.serialization.to_bytes(optimizer.target)
-            f = open(os.path.join(path, "nn_step_{}.txt".format(step)), "wb")
-            f.write(bytes_output)
-            f.close()
+            #bytes_output = flax.serialization.to_bytes(optimizer.target)
+            #f = open(os.path.join(path, "nn_step_{}.txt".format(step)), "wb")
+            #f.write(bytes_output)
+            #f.close()
 
 
     #if FLAGS.expt_name is not None:

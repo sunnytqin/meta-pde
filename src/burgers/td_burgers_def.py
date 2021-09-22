@@ -19,5 +19,5 @@ from .td_burgers_fenics import (solve_fenics, GroundTruth)
 
 dim = 2
 
-#BaseField = make_nf_ndim(dim)
-BaseField = make_res_nf_ndim(dim)
+BaseField = make_nf_ndim(dim)
+#BaseField = make_res_nf_ndim(dim)

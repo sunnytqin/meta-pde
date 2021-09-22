@@ -58,7 +58,7 @@ flags.DEFINE_float("inner_grad_clip", 1e14, "inner grad clipping")
 
 flags.DEFINE_float("outer_loss_decay", 0.1, "0. = just take final loss. 1.=sum all")
 
-FLAGS.td_burger_impose_symmetry = False
+#FLAGS.td_burger_impose_symmetry = False
 
 def main(arvg):
     if FLAGS.out_dir is None:

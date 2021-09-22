@@ -52,8 +52,8 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 
     def integrand(x, field_fn):
         # energy density
-        #young_mod = bc_params[0].astype(float)
-        young_mod = 1.0
+        young_mod = bc_params[0].astype(float)
+        #young_mod = 1.0
         poisson_ratio = 0.49
         d = 2
         shear_mod = young_mod / (2 * (1 + poisson_ratio))

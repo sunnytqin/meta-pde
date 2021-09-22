@@ -303,20 +303,26 @@ def plot_model_time_series(
         plt.figure()
         for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
             ground_truth = fenics_functions[i]
-            plt.subplot(inner_steps + 2, min([N, 8]), 1 + i)
-            plt.axis("off")
-            plt.xlim([FLAGS.xmin * 0.9, FLAGS.xmax * 1.1])
-            plt.ylim([FLAGS.ymin * 0.9, FLAGS.ymax * 1.1])
+            plt_inner_steps = min(max(inner_steps, 1), 5)
+            plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + i)
+            if N > 1:
+                plt.axis("off")
+            plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
+                      FLAGS.xmax * 1.1])
+            plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
+                      FLAGS.ymax * 1.1])
+
             ground_truth.set_allow_extrapolation(False)
             t_val = ground_truth.timesteps_list[t]
             pde.plot_solution(ground_truth[t], params_list[i])
             if i == 0:
                 plt.title("t = {:.2f} \n Truth".format(t_val), fontsize=6)
-            for j in range(0, inner_steps + 1):
-                plt.subplot(inner_steps + 2, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
+            #for j in range(0, inner_steps + 1):
+            steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
+            for j, step in enumerate(steps_plot):
+                plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
                 plt.axis("off")
 
-                #fa_p = None
                 final_model = get_final_model(
                     keys[i], model, params_list[i], j, meta_alg_def,
                 )
@@ -343,8 +349,22 @@ def plot_model_time_series(
                 u_approx.vector().set_local(out)
 
                 pde.plot_solution(u_approx, params_list[i])
-                if j == 0:
+
+                if (i == 0) and (j == 0):
                     plt.title("NN Model", fontsize=4)
+                    if N > 1:
+                        plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                        plt.ylabel(f"Step {step}", fontsize=4)
+                    else:
+                        plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
+                elif i == 0:
+                    if N > 1:
+                        plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                        plt.ylabel(f"Step {step}", fontsize=4)
+                    else:
+                        plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
+                else:
+                    plt.axis("off")
         # save fig here
         plt.savefig('timedependent_burger_' + str(t) + '.png', dpi=400)
         plt.close()
