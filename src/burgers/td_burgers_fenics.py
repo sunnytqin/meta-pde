@@ -158,8 +158,8 @@ def solve_fenics(params, boundary_points=24, resolution=16):
             "maximum_iterations": FLAGS.max_newton_steps,
             "relaxation_parameter": FLAGS.relaxation_parameter,
             "linear_solver": "mumps",
-            #"relative_tolerance": 1e-8,
-            #"absolute_tolerance": 1e-8
+            "relative_tolerance": 1e-5,
+            "absolute_tolerance": 1e-5
         }}
 
     tmp_filenames = []

@@ -102,9 +102,9 @@ def loss_domain_fn(field_fn, points_in_domain, params):
 def loss_vertical_fn(field_fn, points_on_vertical, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
-    A2 = (np.abs(bc_params[0, 2])).astype(float)
+    A0 = (bc_params[0, 0]).astype(float)
+    A1 = (bc_params[0, 1]).astype(float)
+    A2 = (bc_params[0, 2]).astype(float)
     sinusoidal_magnitude = A1 * \
                            np.cos(A2 * np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) *\
                            np.sin(A2 * np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -116,9 +116,9 @@ def loss_vertical_fn(field_fn, points_on_vertical, params):
 def loss_horizontal_fn(field_fn, points_on_horizontal, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
-    A2 = (np.abs(bc_params[0, 2])).astype(float)
+    A0 = (bc_params[0, 0]).astype(float)
+    A1 = (bc_params[0, 1]).astype(float)
+    A2 = (bc_params[0, 2]).astype(float)
     sinusoidal_magnitude = A0 * \
                            np.sin(A2 * np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
                            np.cos(A2 * np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -130,9 +130,9 @@ def loss_horizontal_fn(field_fn, points_on_horizontal, params):
 def loss_initial_fn(field_fn, points_initial, params):
     source_params, bc_params, per_hole_params, n_holes = params
 
-    A0 = (np.abs(bc_params[0, 0])).astype(float)
-    A1 = (np.abs(bc_params[0, 1])).astype(float)
-    A2 = (np.abs(bc_params[0, 2])).astype(float)
+    A0 = (bc_params[0, 0]).astype(float)
+    A1 = (bc_params[0, 1]).astype(float)
+    A2 = (bc_params[0, 2]).astype(float)
     sinusoidal_magnitude_x = A0 * \
                              np.sin(A2 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
                              np.cos(A2 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
@@ -227,19 +227,19 @@ def sample_params(key):
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 1, )) - 1.)
 
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=0.0, maxval=2.0, shape=(1, 1,)
+            k2, minval=0.1, maxval=2.0, shape=(1, 1,)
         )
 
-        bc_params = np.concatenate([bc_params_magnitude, bc_params_magnitude, bc_params_scale, bc_params_scale], axis=1)
+        bc_params = np.concatenate([bc_params_magnitude, bc_params_magnitude, bc_params_scale], axis=1)
     else:
         bc_params_magnitude = FLAGS.bc_scale * jax.random.uniform(
             k2, minval=1.0, maxval=3.0, shape=(1, 2,)
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 2, )) - 1.)
 
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=0.0, maxval=2.0, shape=(1, 1,)
+            k2, minval=0.1, maxval=2.0, shape=(1, 1,)
         )
-        bc_params = np.concatenate([bc_params_magnitude, bc_params_scale, bc_params_scale], axis=1)
+        bc_params = np.concatenate([bc_params_magnitude, bc_params_scale], axis=1)
 
     if not FLAGS.max_holes > 0:
         n_holes = 0
@@ -676,3 +676,5 @@ if __name__ == "__main__":
     flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
 
     app.run(main)
+
+

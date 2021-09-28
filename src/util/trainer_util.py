@@ -317,7 +317,9 @@ def plot_model_time_series(
             pde.plot_solution(ground_truth[t], params_list[i])
             if i == 0:
                 plt.title("t = {:.2f} \n Truth".format(t_val), fontsize=6)
-            for j in range(0, inner_steps + 1):
+            #for j in range(0, inner_steps + 1):
+            steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
+            for j, step in enumerate(steps_plot):
                 plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
                 plt.axis("off")
 
