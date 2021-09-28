@@ -88,6 +88,12 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     def vertical_walls(x, on_boundary):
         return on_boundary and (fa.near(x[0], FLAGS.xmin) or fa.near(x[0], FLAGS.xmax))
 
+    def left_wall(x, on_boundary):
+        return on_boundary and fa.near(x[0], FLAGS.xmin)
+
+    def right_wall(x, on_boundary):
+        return on_boundary and fa.near(x[0], FLAGS.xmax)
+
     def horizontal_walls(x, on_boundary):
         return on_boundary and (fa.near(x[1], FLAGS.ymin) or fa.near(x[1], FLAGS.ymax))
 
@@ -104,105 +110,56 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     u = fa.Function(V)
     v = fa.TestFunction(V)
 
-    # generate cache data
-    cache = {
-        "hparams": (resolution,
-                    FLAGS.xmin, FLAGS.xmax,
-                    FLAGS.ymin, FLAGS.ymax,
-                    FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps,
-                    ),
-        "params": params,
-        "pde": "td_burgers"
-    }
-    # check if PDE has already been solved
-    u_list = []
-    t_list = []
-    for n in range(FLAGS.num_tsteps):
-        u_list.append(u.copy(deepcopy=True))
-        t_list.append(FLAGS.tmin + dt * n)
-    solved = read_fenics_solution(cache, u_list)
     reuse = True
-    if solved and reuse:
-        return GroundTruth(u_list, np.array(t_list))
+    if reuse:
+        # generate cache data
+        cache = {
+            "hparams": (resolution,
+                        FLAGS.xmin, FLAGS.xmax,
+                        FLAGS.ymin, FLAGS.ymax,
+                        FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps,
+                        ),
+            "params": params,
+            "pde": "td_burgers"
+        }
+        # check if PDE has already been solved
+
+        u_list = []
+        t_list = []
+        for n in range(FLAGS.num_tsteps):
+            u_list.append(u.copy(deepcopy=True))
+            t_list.append(FLAGS.tmin + dt * n)
+        solved = read_fenics_solution(cache, u_list)
+        if solved and reuse:
+            return GroundTruth(u_list, np.array(t_list))
 
     # Define function for setting Dirichlet values
-    vertical_expr = fa.Expression(
-        ("0.0",
-         "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
-        A0=float(np.abs(bc_params[0, 0])),
-        A1=float(np.abs(bc_params[0, 1])),
-        A2=float(np.abs(bc_params[0, 2])),
-        xmax=FLAGS.xmax,
-        xmin=FLAGS.xmin,
-        ymax=FLAGS.ymax,
-        ymin=FLAGS.ymin,
-        element=V.ufl_element(),
-    )
-
-    horizontal_expr = fa.Expression(
-        ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
-         "0.0"),
-        A0=float(np.abs(bc_params[0, 0])),
-        A1=float(np.abs(bc_params[0, 1])),
-        A2=float(np.abs(bc_params[0, 2])),
-        xmax=FLAGS.xmax,
-        xmin=FLAGS.xmin,
-        ymax=FLAGS.ymax,
-        ymin=FLAGS.ymin,
-        element=V.ufl_element(),
-    )
-
     non_slip = fa.Constant((0.0, 0.0))
 
     u_D = fa.Expression(
-        ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
-         "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
-        A0=float(np.abs(bc_params[0, 0])),
-        A1=float(np.abs(bc_params[0, 1])),
-        A2=float(np.abs(bc_params[0, 2])),
+        ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A3*pi*(x[1]-ymin)/(ymax-ymin))",
+         "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A3*pi*(x[1]-ymin)/(ymax-ymin))"),
+        A0=float(bc_params[0, 0]),
+        A1=float(bc_params[0, 1]),
+        A2=float(bc_params[0, 2]),
+        A3=float(bc_params[0, 3]),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
         ymin=FLAGS.ymin,
         element=V.ufl_element())
-
     u_n = fa.project(u_D, V)
-    bc_vertical = fa.DirichletBC(V, vertical_expr, vertical_walls)
-    bc_horizontal = fa.DirichletBC(V, horizontal_expr, horizontal_walls)
-    bc_nonslip = fa.DirichletBC(V, non_slip, non_slip_walls)
 
     # Define variational problem
     u.vector().set_local(np.random.randn(len(u.vector())) * 1e-6)
-
-    #     [ux   uy  ] [u   = [u ux + vuy
-    #      vx   vy     v]     u vx + v vy]
-
-    # (u ux - uxx)  +  (v uy - uyy)
-    reynolds = float(1 / source_params[0])
-
-    dt = (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
-
-    lhs_term = fa.dot(u, v) + \
-               reynolds * dt * fa.inner(fa.grad(u), fa.grad(v)) + \
-               dt * fa.inner(fa.grad(u) * u, v)
-
-    # [ u0xx + u0yy
-    #   u1xx + u1yy ]
-
-    #  u0xx * v0 -> - u0x * v0x
-    #  u0yy * v0 -> u0y * v0y
-
-    rhs_term = fa.dot(u_n, v)
-
-    F = (
-        lhs_term * fa.dx - rhs_term * fa.dx
-    )
 
     solver_parameters = {
         "newton_solver": {
             "maximum_iterations": FLAGS.max_newton_steps,
             "relaxation_parameter": FLAGS.relaxation_parameter,
             "linear_solver": "mumps",
+            #"relative_tolerance": 1e-8,
+            #"absolute_tolerance": 1e-8
         }}
 
     tmp_filenames = []
@@ -212,22 +169,109 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     u_list.append(u_n.copy(deepcopy=True))
     t_list.append(FLAGS.tmin)
     for n in range(FLAGS.num_tsteps - 1):
+        t = FLAGS.tmin + dt * (n + 1)
+
+        left_expr = fa.Expression(
+            ("0.0",
+             "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A3*pi*(x[1]-ymin)/(ymax-ymin))"),
+            A0=float(bc_params[0, 0]),
+            A1=float(bc_params[0, 1]),
+            A2=float(bc_params[0, 2]),
+            A3=float(bc_params[0, 3]),
+            xmax=FLAGS.xmax,
+            xmin=FLAGS.xmin,
+            ymax=FLAGS.ymax,
+            ymin=FLAGS.ymin,
+            element=V.ufl_element(),
+        )
+
+        right_expr = fa.Expression(
+            ("0.0",
+             "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A3*pi*(x[1]-ymin)/(ymax-ymin))"),
+            A0=float(bc_params[0, 0]),
+            A1=float(bc_params[0, 1]),
+            A2=float(bc_params[0, 2]),
+            A3=float(bc_params[0, 3]),
+            xmax=FLAGS.xmax,
+            xmin=FLAGS.xmin,
+            ymax=FLAGS.ymax,
+            ymin=FLAGS.ymin,
+            element=V.ufl_element(),
+        )
+
+        horizontal_expr = fa.Expression(
+            ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A3*pi*(x[1]-ymin)/(ymax-ymin))",
+             "0.0"),
+            A0=float(bc_params[0, 0]),
+            A1=float(bc_params[0, 1]),
+            A2=float(bc_params[0, 2]),
+            A3=float(bc_params[0, 3]),
+            xmax=FLAGS.xmax,
+            xmin=FLAGS.xmin,
+            ymax=FLAGS.ymax,
+            ymin=FLAGS.ymin,
+            t=t,
+            element=V.ufl_element(),
+        )
+        bc_left = fa.DirichletBC(V, left_expr, left_wall)
+        bc_right = fa.DirichletBC(V, right_expr, right_wall)
+        bc_horizontal = fa.DirichletBC(V, horizontal_expr, horizontal_walls)
+        bc_nonslip = fa.DirichletBC(V, non_slip, non_slip_walls)
+
+        #     [ux   uy  ] [u   = [u ux + vuy
+        #      vx   vy     v]     u vx + v vy]
+
+        # (u ux - uxx)  +  (v uy - uyy)
+        #reynolds = (2*np.exp(t) + 1) * float(1 / source_params[0])
+        #p1 = fa.Expression("r", degree=1, r=float(1. / source_params[0]))
+        #p2 = fa.Expression("0.3*r", degree=1, r=float(1. / source_params[0]))
+        #reynolds = fa.Expression("pow(x[0],2)+pow(x[1],2)+2.*x[0]*x[1] < pow(0.8,2) + DOLFIN_EPS ? p1 : p2",
+        #                  p1=p1,
+        #                  p2=p2,
+        #                  degree=2)
+
+        #reynolds = fa.Expression("(sin(pi*x[0])+1.0)*r",
+        #                         r=float(1 / source_params[0]),
+        #                         degree=2
+        #                         )
+
+        reynolds = fa.Expression("r", degree=1, r=float(1. / source_params[0]))
+
+        dt = (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
+
+        lhs_term = fa.dot(u, v) + \
+                   reynolds * dt * fa.inner(fa.grad(u), fa.grad(v)) + \
+                   dt * fa.inner(fa.grad(u) * u, v)
+
+        # [ u0xx + u0yy
+        #   u1xx + u1yy ]
+
+        #  u0xx * v0 -> - u0x * v0x
+        #  u0yy * v0 -> u0y * v0y
+
+        rhs_term = fa.dot(u_n, v)
+
+        F = (
+                lhs_term * fa.dx - rhs_term * fa.dx
+        )
+
+
         try:
             fa.solve(
                 F == 0,
                 u,
-                [bc_vertical, bc_horizontal],
+                [bc_horizontal, bc_left, bc_right],
                 solver_parameters=solver_parameters,
             )
         except Exception as e:
             print("Failed solve: ", e)
             print("Failed on params: ", params)
             solver_parameters['newton_solver']['relaxation_parameter'] *= 0.2
-            fa.solve(F == 0, u, [bc_vertical, bc_horizontal], solver_parameters=solver_parameters)
+            fa.solve(F == 0, u, [bc_left, bc_right, bc_horizontal], solver_parameters=solver_parameters)
 
         u_list.append(u.copy(deepcopy=True))
         u_n.assign(u)
-        t_list.append(FLAGS.tmin + dt * (n + 1))
+        t_list.append(t)
 
     for n in range(FLAGS.num_tsteps):
         u = u_list[n]
@@ -249,9 +293,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
 
     print('Time steps solved by fenics', t_list)
 
-    if not solved:
+    if reuse:
         path = save_fenics_solution(cache, GroundTruth(u_list, np.array(t_list)))
         build_gif(tmp_filenames, os.path.join(path, 'td_burgers.gif'))
+    else:
+        build_gif(tmp_filenames)
 
     return GroundTruth(u_list, np.array(t_list))
 

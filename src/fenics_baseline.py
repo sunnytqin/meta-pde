@@ -58,8 +58,6 @@ def main(argv):
     gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
     gt_params = vmap(pde.sample_params)(gt_keys)
     print("gt_params: {}".format(gt_params))
-    #for i in range(len(gt_keys)):
-    #    print(f"{i}: {jax_tools.tree_unstack(gt_params)[i]}")
 
     gt_functions, gt_vals, coords = trainer_util.get_ground_truth_points(
         pde,
@@ -72,9 +70,6 @@ def main(argv):
     )
 
     test_resolutions = [int(s) for s in FLAGS.test_resolutions.split(',')]
-
-    def make_coef_func(key, model, params, coords):
-        return model
 
     def validation_error(ground_truth_vals, test_vals):
         test_vals = test_vals.reshape(test_vals.shape[0], test_vals.shape[1], -1)
@@ -113,21 +108,9 @@ def main(argv):
     errs = {}
     times = {}
 
-    for res in test_resolutions:
-        time_tracker = []
-        for i in range(len(gt_keys)):
-            with Timer() as t:
-                _, _, _ = trainer_util.get_ground_truth_points(
-                    pde,
-                    [jax_tools.tree_unstack(gt_params)[i]],
-                    gt_points_key,
-                    resolution=res,
-                    boundary_points=int(FLAGS.boundary_resolution_factor * res),
-                )
-            time_tracker.append(t.interval)
-        print(f'resolution {res}: {time_tracker}')
 
     for res in test_resolutions:
+        #os.system('dijitso clean')
         print('resolution: ')
         with Timer() as t:
             test_fns, test_vals, test_coords = trainer_util.get_ground_truth_points(
@@ -150,10 +133,10 @@ def main(argv):
         #fa.plot(u)
         #plt.show()
 
-        plt.figure(figsize=(5, 5))
+        #plt.figure(figsize=(5, 5))
         #print('test_fn', type(test_fns[0]))
-        fa.plot(test_fns[0])
-        plt.show()
+        #fa.plot(test_fns[0][-1])
+        #plt.show()
         #assert np.allclose(test_coords, coords)
 
         mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = validation_error(test_vals, gt_vals)
@@ -176,7 +159,7 @@ def main(argv):
         errs[res] = validation_error(gt_vals, test_vals)
         times[res] = t.interval / FLAGS.n_eval
 
-    npo.save(os.path.join(path, "errors_by_resolution.npy"), (errs, times), allow_pickle=True)
+    #npo.save(os.path.join(path, "errors_by_resolution.npy"), (errs, times), allow_pickle=True)
 
     #pdb.set_trace()
 
