@@ -363,6 +363,7 @@ def main(argv):
                     plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(losses[0], axis=0))
                     plt.xlabel('Inner Step')
                     plt.ylabel('Loss')
+                    plt.yscale('log')
                     tflogger.log_plots(
                         "Per inner step step loss", [plt.gcf()], step
                     )
@@ -371,6 +372,7 @@ def main(argv):
                     plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(val_losses[0], axis=0))
                     plt.xlabel('Inner Step')
                     plt.ylabel('Val Loss')
+                    plt.yscale('log')
                     tflogger.log_plots(
                         "Per inner step step val loss", [plt.gcf()], step
                     )

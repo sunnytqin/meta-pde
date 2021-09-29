@@ -522,12 +522,32 @@ def main(argv):
                         "Fenics_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
 
-                    to_plot = fenics_vals[0][:, dim] - _outputs_on_coords[:, dim]
-                    plt.figure()
-                    clrs = plt.scatter(
-                        coords[0][:, 0], coords[0][:, 1], c=to_plot
+                    norm_to_plot = np.linalg.norm(fenics_vals[0], axis=1)
+                    
+                    plt.figure(figsize=(24, 8))
+                    for i, t_plot in enumerate(t_list):
+                        plt.subplot(2, len(t_list)//2, i + 1)
+                        t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+                        clrs = plt.scatter(
+                        coords[0][t_idx, 0], coords[0][t_idx, 1], c=norm_to_plot[t_idx]
+                        )
+                        plt.title(f"t = {t_plot:.3f}")
+                        plt.colorbar(clrs)
+                    tflogger.log_plots(
+                        "Ground_truth_norm_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
-                    plt.colorbar(clrs)
+
+                    mse_to_plot = (fenics_vals[0][:, dim] - _outputs_on_coords[:, dim])**2
+
+                    plt.figure(figsize=(24, 8))
+                    for i, t_plot in enumerate(t_list):
+                        plt.subplot(2, len(t_list)//2, i + 1)
+                        t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+                        clrs = plt.scatter(
+                        coords[0][t_idx, 0], coords[0][t_idx, 1], c=mse_to_plot[t_idx]
+                        )
+                        plt.title(f"t = {t_plot:.3f}")
+                        plt.colorbar(clrs)
                     tflogger.log_plots(
                         "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
@@ -593,6 +613,7 @@ def main(argv):
                     plt.plot(t_list, t_rel_sq_err, '.')
                     plt.xlabel('t')
                     plt.ylabel('val rel err')
+                    plt.yscale('log')
                     tflogger.log_plots(
                         "Per time step relative error", [plt.gcf()], step
                     )
@@ -677,3 +698,7 @@ def main(argv):
 
 if __name__ == "__main__":
     app.run(main)
+
+
+
+
