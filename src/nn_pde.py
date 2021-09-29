@@ -380,7 +380,6 @@ def main(argv):
     gt_params = vmap(pde.sample_params)(gt_keys)
     print("gt_params: {}".format(gt_params))
 
-    quit()
 
     fenics_functions, fenics_vals, coords = trainer_util.get_ground_truth_points(
         pde, jax_tools.tree_unstack(gt_params), gt_points_key

@@ -137,12 +137,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     non_slip = fa.Constant((0.0, 0.0))
 
     u_D = fa.Expression(
-        ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A3*pi*(x[1]-ymin)/(ymax-ymin))",
-         "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A3*pi*(x[1]-ymin)/(ymax-ymin))"),
+        ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
+         "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
         A0=float(bc_params[0, 0]),
         A1=float(bc_params[0, 1]),
         A2=float(bc_params[0, 2]),
-        A3=float(bc_params[0, 3]),
         xmax=FLAGS.xmax,
         xmin=FLAGS.xmin,
         ymax=FLAGS.ymax,
@@ -172,12 +171,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         t = FLAGS.tmin + dt * (n + 1)
 
         left_expr = fa.Expression(
-            ("0.0",
-             "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A3*pi*(x[1]-ymin)/(ymax-ymin))"),
+            ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
+             "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
             A0=float(bc_params[0, 0]),
             A1=float(bc_params[0, 1]),
             A2=float(bc_params[0, 2]),
-            A3=float(bc_params[0, 3]),
             xmax=FLAGS.xmax,
             xmin=FLAGS.xmin,
             ymax=FLAGS.ymax,
@@ -186,12 +184,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         )
 
         right_expr = fa.Expression(
-            ("0.0",
-             "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A3*pi*(x[1]-ymin)/(ymax-ymin))"),
+            ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
+             "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
             A0=float(bc_params[0, 0]),
             A1=float(bc_params[0, 1]),
             A2=float(bc_params[0, 2]),
-            A3=float(bc_params[0, 3]),
             xmax=FLAGS.xmax,
             xmin=FLAGS.xmin,
             ymax=FLAGS.ymax,
@@ -200,12 +197,11 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         )
 
         horizontal_expr = fa.Expression(
-            ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A3*pi*(x[1]-ymin)/(ymax-ymin))",
-             "0.0"),
+            ("A0*sin(A2*pi*(x[0]-xmin)/(xmax-xmin))*cos(A2*pi*(x[1]-ymin)/(ymax-ymin))",
+             "A1*cos(A2*pi*(x[0]-xmin)/(xmax-xmin))*sin(A2*pi*(x[1]-ymin)/(ymax-ymin))"),
             A0=float(bc_params[0, 0]),
             A1=float(bc_params[0, 1]),
             A2=float(bc_params[0, 2]),
-            A3=float(bc_params[0, 3]),
             xmax=FLAGS.xmax,
             xmin=FLAGS.xmin,
             ymax=FLAGS.ymax,
