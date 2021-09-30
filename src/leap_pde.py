@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 import pdb
 import sys
 import os
+import pickle
 import shutil
 from copy import deepcopy
 from collections import namedtuple
@@ -430,8 +431,9 @@ def main(argv):
                 pde.build_gif(tmp_filenames, outfile=gif_out)
 
             # save model
-            #with open(os.path.join(path, "leap_step_{}.txt".format(step)), "w") as f:
-            #    f.write(optimizer_target_prev)
+            optimizer_target = flax.serialization.to_state_dict(optimizer.target)
+            with open(os.path.join(path, "leap_step_{}.pickle".format(step)), "wb") as f:
+                pickle.dump(optimizer_target, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     #if FLAGS.expt_name is not None:
     #    outfile.close()

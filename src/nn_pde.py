@@ -32,6 +32,8 @@ import pdb
 import sys
 import os
 import logging
+import re
+import pickle
 
 from .util import common_flags
 
@@ -172,6 +174,28 @@ def main(argv):
         _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
     else:
         _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+
+
+    if FLAGS.load_model_from_expt is not None:
+        model_dir = FLAGS.pde + "_leap_results"
+        model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
+        model_file = npo.array(
+            [f for f in os.listdir(model_path) if "leap_step" in f]
+        )
+        steps = npo.zeros_like(model_file, dtype=int)
+        for i, f in enumerate(model_file):
+            steps[i] = re.findall('[0-9]+', f)[-1]
+        model_file = model_file[
+            np.argsort(steps)[-1]
+        ]
+        log('load pre-trained model from file: ', model_file)
+        with open(os.path.join(model_path, model_file), 'rb') as f:
+            optimizer_target = pickle.load(f)
+
+        init_params = flax.serialization.from_state_dict(init_params, optimizer_target['params'])
+
+    #print(optimizer_target['params']['Dense_0'])
+    print(init_params['Dense_0'])
 
     log(
         'NN model:', jax.tree_map(lambda x: x.shape, init_params)
@@ -416,6 +440,10 @@ def main(argv):
     # --------------------- Run MAML --------------------
 
     time_last_log = time.time()
+    #optimizer.target = flax.serialization.from_state_dict(optimizer.target, optimizer_target)
+
+    #print(optimizer_target['params']['Dense_0'])
+    print(optimizer.target.params['Dense_0'])
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
