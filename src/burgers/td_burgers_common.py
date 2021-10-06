@@ -234,7 +234,7 @@ def sample_params(key):
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 1, )) - 1.)
 
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-             k2, minval=1.8, maxval=2.0, shape=(1, 1,)
+             k2, minval=0.1, maxval=1.5, shape=(1, 1,)
         )
 
         bc_params = np.concatenate([bc_params_magnitude, bc_params_magnitude, bc_params_scale], axis=1)
@@ -455,7 +455,7 @@ def sample_points_on_pores(key, n, params):
     return xy_t
 
 
-# new
+
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_in_domain(key, n, params):
     _, _, per_hole_params, n_holes = params
@@ -501,6 +501,7 @@ def sample_points_in_domain(key, n, params):
     assert len(xy_t) == n_scaled * (FLAGS.num_tsteps - 1)
 
     return xy_t
+
 
 
 # new

@@ -177,10 +177,11 @@ def main(argv):
 
 
     if FLAGS.load_model_from_expt is not None:
-        model_dir = FLAGS.pde + "_leap_results"
-        model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
+        #model_dir = FLAGS.pde + "_leap_results"
+        #model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
+        model_path = FLAGS.load_model_from_expt
         model_file = npo.array(
-            [f for f in os.listdir(model_path) if "leap_step" in f]
+            [f for f in os.listdir(model_path) if "nn_step" in f]
         )
         steps = npo.zeros_like(model_file, dtype=int)
         for i, f in enumerate(model_file):
@@ -702,12 +703,12 @@ def main(argv):
                 )
                 gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
                 pde.build_gif(tmp_filenames, outfile=gif_out)
+            
 
             # save model
-            #bytes_output = flax.serialization.to_bytes(optimizer.target)
-            #f = open(os.path.join(path, "nn_step_{}.txt".format(step)), "wb")
-            #f.write(bytes_output)
-            #f.close()
+            optimizer_target = flax.serialization.to_state_dict(optimizer.target)
+            with open(os.path.join(path, "model_step_{}.pickle".format(step)), "wb") as f:
+                pickle.dump(optimizer_target, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
     #if FLAGS.expt_name is not None:

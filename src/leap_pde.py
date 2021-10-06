@@ -432,7 +432,7 @@ def main(argv):
 
             # save model
             optimizer_target = flax.serialization.to_state_dict(optimizer.target)
-            with open(os.path.join(path, "leap_step_{}.pickle".format(step)), "wb") as f:
+            with open(os.path.join(path, "model_step_{}.pickle".format(step)), "wb") as f:
                 pickle.dump(optimizer_target, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     #if FLAGS.expt_name is not None:
