@@ -236,32 +236,42 @@ def sample_params(key):
         per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
         return source_params, bc_params, per_hole_params, n_holes
 
-    n_holes = 1
+    n_holes = FLAGS.max_holes
 
     pore_shapes = jax.random.uniform(
-        k4, minval=-0.1, maxval=0.1, shape=(2,)
+        k4, minval=-0.1, maxval=0.1, shape=(n_holes, 2,)
     )
 
     pore_sizes = jax.random.uniform(
         k6,
-        minval=0.2 * FLAGS.max_hole_size,
+        minval=0.8 * FLAGS.max_hole_size,
         maxval=FLAGS.max_hole_size,
-        shape=(1,),
+        shape=(n_holes, 1),
     )
 
-    pore_x0y0 = np.array([(FLAGS.xmax + FLAGS.xmin)/2, (FLAGS.ymax + FLAGS.ymin)/2])
+    spacing = 1.2
+    xlow = FLAGS.xmin + spacing * FLAGS.max_hole_size
+    xhigh = FLAGS.xmax - spacing * FLAGS.max_hole_size
+    ylow = FLAGS.ymin + spacing * FLAGS.max_hole_size
+    yhigh = FLAGS.ymax - spacing * FLAGS.max_hole_size
 
-    per_hole_params = (pore_shapes, pore_x0y0, pore_sizes)
+    #pore_x0y0 = np.array([(FLAGS.xmax + FLAGS.xmin)/2, (FLAGS.ymax + FLAGS.ymin)/2])
+    pore_x0y0 = jax.random.uniform(k7,
+                                   minval=np.array([[xlow, ylow]]),
+                                   maxval=np.array([[xhigh, yhigh]]),
+                                   shape=(FLAGS.max_holes, 2))
+
+    per_hole_params = np.concatenate((pore_shapes, pore_x0y0, pore_sizes), axis=1)
 
     return source_params, bc_params, per_hole_params, n_holes
 
 
 def is_in_hole(xy, pore_params, tol=1e-7):
-    c, xy0, size = pore_params
-    vector = xy - xy0
+    c1, c2, x0, y0, size = pore_params
+    vector = xy - np.array([x0, y0])
     theta = np.arctan2(*vector)
     length = np.linalg.norm(vector)
-    r0 = size * (1.0 + c[0] * np.cos(4 * theta) + c[1] * np.cos(8 * theta))
+    r0 = size * (1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta))
     return r0 > length + tol
 
 
@@ -339,16 +349,24 @@ def sample_points_right(key, n,  params):
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_on_pores(key, n, params):
     _, _, per_hole_params, n_holes = params
+    x = []
+    y = []
+    for per_hole_param in per_hole_params:
 
-    c, xy, size = per_hole_params
+        c = per_hole_param[0: 2]
+        xy = per_hole_param[2: 4]
+        size = per_hole_param[4]
+        #c, xy, size = per_hole_param
 
-    thetas = jax.random.uniform(
-        key, minval=0.0, maxval=1.0, shape=(n,)
-    ) * 2 * np.pi
+        thetas = jax.random.uniform(
+            key, minval=0.0, maxval=1.0, shape=(n,)
+        ) * 2 * np.pi
 
-    r0 = size * (1.0 + c[0] * np.cos(4 * thetas) + c[1] * np.cos(8 * thetas))
-    x = xy[0] + r0 * np.cos(thetas)
-    y = xy[1] + r0 * np.sin(thetas)
+        r0 = size * (1.0 + c[0] * np.cos(4 * thetas) + c[1] * np.cos(8 * thetas))
+        x.append(xy[0] + r0 * np.cos(thetas))
+        y.append(xy[1] + r0 * np.sin(thetas))
+    x = np.array(x)
+    y = np.array(y)
 
     return np.concatenate([x[:, None], y[:, None]], axis=1)
 
@@ -376,10 +394,15 @@ def sample_points_in_domain(key, n, params):
         k1, minval=0.0, maxval=np.array([[dx, dy]]), shape=(len(xy), 2)
     )
 
-    in_hole = np.squeeze(jax.vmap(is_in_hole, in_axes=(0, None))(xy, per_hole_params))
-    #print("in_hole shape: ", in_hole.shape, xy.shape[0])
+    in_hole = jax.vmap(
+        jax.vmap(is_in_hole, in_axes=(0, None)), in_axes=(None, 0), out_axes=1
+    )(xy, per_hole_params)
 
-    #in_hole = np.any(in_hole, axis=1)
+    mask = np.arange(per_hole_params.shape[0], dtype=np.int32).reshape(1, -1)
+    mask = mask < n_holes
+    in_hole = in_hole * mask
+    in_hole = np.any(in_hole, axis=1)
+    #in_hole = np.squeeze(jax.vmap(is_in_hole, in_axes=(0, None))(xy, per_hole_params))
 
     idxs = jax.random.choice(k2, xy.shape[0], replace=False, p=1 - in_hole, shape=(n,))
     return xy[idxs]
