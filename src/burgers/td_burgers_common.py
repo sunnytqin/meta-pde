@@ -39,8 +39,6 @@ flags.DEFINE_integer("propagatetime_max", 20_000, "maximum iterations before pro
 flags.DEFINE_float("propagatetime_rel", 0.05, "rel val improvment change before propagate time step")
 FLAGS.bc_weight = 1.0
 FLAGS.max_holes = 0
-FLAGS.viz_every = int(5e4)
-FLAGS.log_every = int(5e3)
 FLAGS.measure_grad_norm_every = int(2e3)
 FLAGS.outer_steps = int(1e8)
 
@@ -208,11 +206,12 @@ def loss_fn(field_fn, points, params):
 @jax.jit
 def sample_params(key):
     if FLAGS.fixed_num_pdes is not None:
-        key = jax.random.PRNGKey(
-            jax.random.randint(
-                key, (1,), np.array([0]), np.array([FLAGS.fixed_num_pdes])
-            )[0]
-        )
+        #key = jax.random.PRNGKey(
+        #    jax.random.randint(
+        #        key, (1,), np.array([0]), np.array([FLAGS.fixed_num_pdes])
+        #    )[0]
+        #)
+        key = jax.random.PRNGKey(FLAGS.seed)
 
     k1, k2, k3, k4, k5, k6, k7 = jax.random.split(key, 7)
 
@@ -234,7 +233,7 @@ def sample_params(key):
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 1, )) - 1.)
 
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-             k2, minval=0.1, maxval=1.5, shape=(1, 1,)
+             k2, minval=1.4, maxval=1.5, shape=(1, 1,)
         )
 
         bc_params = np.concatenate([bc_params_magnitude, bc_params_magnitude, bc_params_scale], axis=1)
@@ -329,7 +328,6 @@ def sample_points(key, n, params):
         points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
     else:
         points_on_holes = np.array([points_in_domain[0]])
-
 
     return (
         points_on_vertical,
@@ -454,8 +452,6 @@ def sample_points_on_pores(key, n, params):
 
     return xy_t
 
-
-
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_in_domain(key, n, params):
     _, _, per_hole_params, n_holes = params
@@ -465,8 +461,8 @@ def sample_points_in_domain(key, n, params):
     n_scaled = n // (FLAGS.num_tsteps - 1)
     # total number of points is 2 * n
     # so as long as the fraction of volume covered is << 1/2 we are ok
-    n_x = npo.int32(npo.sqrt(2) * npo.sqrt(n_scaled) * npo.sqrt(ratio))
-    n_y = npo.int32(npo.sqrt(2) * npo.sqrt(n_scaled) / npo.sqrt(ratio))
+    n_x = npo.int32(npo.sqrt(1.1) * npo.sqrt(n_scaled) * npo.sqrt(ratio))
+    n_y = npo.int32(npo.sqrt(1.1) * npo.sqrt(n_scaled) / npo.sqrt(ratio))
     dx = (FLAGS.xmax - FLAGS.xmin) / n_x
     dy = (FLAGS.ymax - FLAGS.ymin) / n_y
 
@@ -481,17 +477,18 @@ def sample_points_in_domain(key, n, params):
         k1, minval=0.0, maxval=np.array([[dx, dy]]), shape=(len(xy), 2)
     )
 
-    in_hole = jax.vmap(
-        jax.vmap(is_in_hole, in_axes=(0, None)), in_axes=(None, 0), out_axes=1
-    )(xy, per_hole_params)
+    #in_hole = jax.vmap(
+    #    jax.vmap(is_in_hole, in_axes=(0, None)), in_axes=(None, 0), out_axes=1
+    #)(xy, per_hole_params)
 
-    mask = np.arange(per_hole_params.shape[0], dtype=np.int32).reshape(1, -1)
-    mask = mask < n_holes
-    in_hole = in_hole * mask
-    in_hole = np.any(in_hole, axis=1)
+    #mask = np.arange(per_hole_params.shape[0], dtype=np.int32).reshape(1, -1)
+    #mask = mask < n_holes
+    #in_hole = in_hole * mask
+    #in_hole = np.any(in_hole, axis=1)
 
-    idxs = jax.random.choice(k2, xy.shape[0], replace=False, p=1 - in_hole, shape=(n_scaled,))
-    xy = np.array(xy[idxs])
+    #idxs = jax.random.choice(k2, xy.shape[0], replace=False, p=1 - in_hole, shape=(n_scaled,))
+    idxs = np.arange(n_scaled)
+    xy = np.array(jax.random.shuffle(k2, xy)[idxs])
 
     t = sample_time(k3, n_scaled)
 
@@ -501,8 +498,6 @@ def sample_points_in_domain(key, n, params):
     assert len(xy_t) == n_scaled * (FLAGS.num_tsteps - 1)
 
     return xy_t
-
-
 
 # new
 def sample_points_initial(key, n, params):

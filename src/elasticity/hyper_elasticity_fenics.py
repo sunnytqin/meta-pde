@@ -32,7 +32,7 @@ if __name__ == "__main__":
     flags.DEFINE_float("max_hole_size", .2, "scale on random uniform bc")
     flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
 
-from .elasticity_common import (
+from .hyper_elasticity_common import (
     plot_solution,
     loss_fn,
     SecondOrderTaylorLookup,
@@ -63,22 +63,24 @@ def make_domain(c1, c2, n_points, x0, y0, size):
         pdb.set_trace()
 
 
-def solve_fenics(params, boundary_points=64, resolution=1):
+def solve_fenics(params, boundary_points=64, resolution=16):
     print("solving with params ", params)
     print("resolution ", resolution)
     domain = mshr.Rectangle(
         fa.Point([FLAGS.xmin, FLAGS.ymin]), fa.Point([FLAGS.xmax, FLAGS.ymax]),
     )
     source_params, bc_params, per_hole_params, n_holes = params
-    print('per hole params: ', per_hole_params)
 
-    c, xy, size = per_hole_params
     # pdb.set_trace()
-
-    holes = make_domain(c[0], c[1], boundary_points, xy[0], xy[1], size)
+    holes = [
+        make_domain(c1, c2, boundary_points, x0, y0, size)
+        for c1, c2, x0, y0, size in per_hole_params
+    ]
 
     if n_holes > 0:
-        obstacle = holes
+        obstacle = holes[0]
+        for o2 in holes[1:]:
+            obstacle = obstacle + o2
         domain = domain - obstacle
 
     mesh = mshr.generate_mesh(domain, resolution)
@@ -146,19 +148,6 @@ def solve_fenics(params, boundary_points=64, resolution=1):
     # Compute Jacobian of F
     J = fa.derivative(F, u, du)
 
-    # generate cache data
-    cache = {
-        "hparams": (resolution,
-                    FLAGS.xmin, FLAGS.xmax,
-                    FLAGS.ymin, FLAGS.ymax,
-                    ),
-        "params": np.hstack(params),
-        "pde": "hyper_elasticity"
-    }
-    #solved = read_fenics_solution(cache, u)
-    #reuse = False # seg fault
-    #if solved and reuse:
-    #    return u
 
     fa.parameters["form_compiler"]["cpp_optimize"] = True
     ffc_options = {"optimize": True,
@@ -222,7 +211,7 @@ def main(argv):
 
     print("params: ", params)
 
-    u = solve_fenics(params)
+    u = solve_fenics(params=params, resolution=32)
 
     x = np.array(u.function_space().tabulate_dof_coordinates()[:100])
 

@@ -112,7 +112,8 @@ def main(argv):
 
         return variational_energy_estimator
 
-    make_inner_opt = flax.optim.Momentum(learning_rate=FLAGS.inner_lr, beta=0.0).create
+    #make_inner_opt = flax.optim.Momentum(learning_rate=FLAGS.inner_lr, beta=0.0).create
+    make_inner_opt = flax.optim.Adam(learning_rate=FLAGS.inner_lr, beta1=0.9, beta2=0.99).create
 
     leap_def = leap.LeapDef(
         make_inner_opt=make_inner_opt,

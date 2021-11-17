@@ -159,7 +159,7 @@ def main(argv):
         errs[res] = validation_error(gt_vals, test_vals)
         times[res] = t.interval / FLAGS.n_eval
 
-    #npo.save(os.path.join(path, "errors_by_resolution.npy"), (errs, times), allow_pickle=True)
+    npo.save(os.path.join(path, "errors_by_resolution.npy"), (errs, times), allow_pickle=True)
 
     #pdb.set_trace()
 

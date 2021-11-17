@@ -2,8 +2,8 @@ import absl
 from absl import app
 from absl import flags
 
-from jax.config import config; config.update("jax_log_compiles", 1)
-
+from jax.config import config
+config.update("jax_log_compiles", 0)
 
 FLAGS = flags.FLAGS
 

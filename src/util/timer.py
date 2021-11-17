@@ -1,4 +1,4 @@
-"""Simple class to time exection"""
+"""Simple class to time execution"""
 import time
 
 

@@ -60,7 +60,6 @@ def main(argv):
     log(FLAGS.flags_into_string())
 
     # --------------------- Defining the training algorithm --------------------
-
     def loss_fn(field_fn, points, params):
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
         loss = np.sum(
@@ -89,7 +88,6 @@ def main(argv):
         else:
             return loss, {**boundary_losses, **domain_losses}
 
-
     def task_loss_fn(key, model):
         # The input key is terminal
         k1, k2 = jax.random.split(key, 2)
@@ -97,14 +95,12 @@ def main(argv):
         points = pde.sample_points(k2, FLAGS.outer_points, params)
         return loss_fn(model, points, params)
 
-
-
     @jax.jit
     def get_grad_norms(key, model):
-        _, (loss_dict, _) = batch_loss_fn(key, model, None)
+        _, (loss_dict, _) = batch_loss_fn(key, model)
         losses_and_grad_norms = {}
         for k in loss_dict:
-            single_loss_fn = lambda model: batch_loss_fn(key, model, None)[1][0][k]
+            single_loss_fn = lambda model: batch_loss_fn(key, model)[1][0][k]
             loss_val, loss_grad = jax.value_and_grad(single_loss_fn)(model)
             loss_grad_norm = np.sqrt(
                 jax.tree_util.tree_reduce(
@@ -115,154 +111,9 @@ def main(argv):
             losses_and_grad_norms[k] = (loss_val, loss_grad_norm)
         return losses_and_grad_norms
 
-
+    #@partial(jax.jit, static_argnums=[2])
     @jax.jit
-    def perform_annealing(loss_grads, bc_weights_prev):
-        bc_weights = {FLAGS.domain_loss: 1.}
-        for k, loss_grad in loss_grads.items():
-            if k == FLAGS.domain_loss:
-                if FLAGS.annealing_l2:
-                    domain_loss_grad_max = np.sum(
-                        np.array(jax.tree_flatten(
-                        jax.tree_util.tree_map(lambda x: np.sum(x**2), loss_grad))[0]
-                        )
-                    )
-                else:
-                    domain_loss_grad_max = np.max(
-                        np.array(jax.tree_flatten(
-                        jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
-                        )
-                    )
-            else:
-                if FLAGS.annealing_l2:
-                    loss_grad_mean = np.sum(
-                        np.array(jax.tree_flatten(
-                            jax.tree_util.tree_map(lambda x: np.sum(x**2), loss_grad))[0]
-                        )
-                    )
-                else:
-                    loss_grad_mean = np.sum(
-                        np.array(jax.tree_flatten(
-                            jax.tree_util.tree_map(lambda x: np.sum(np.abs(x)), loss_grad))[0]
-                        )
-                    )
-                bc_weights[k] = loss_grad_mean
-        for k in loss_grads:
-            if k == FLAGS.domain_loss:
-                continue
-            if bc_weights_prev is not None:
-                bc_weights[k] = (1 - FLAGS.annealing_alpha) * bc_weights_prev[k] + \
-                                FLAGS.annealing_alpha * (domain_loss_grad_max / bc_weights[k])
-            else:
-                bc_weights[k] = domain_loss_grad_max / bc_weights[k]
-        return bc_weights
-
-    Field = pde.BaseField.partial(
-        sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
-        dense_args=(),
-        nonlinearity=np.sin if FLAGS.siren else nn.swish,
-        omega=FLAGS.siren_omega,
-        omega0=FLAGS.siren_omega0,
-        log_scale=FLAGS.log_scale,
-        use_laaf=FLAGS.laaf,
-        use_nlaaf=FLAGS.nlaaf,
-    )
-
-    key, subkey = jax.random.split(jax.random.PRNGKey(0))
-
-    if FLAGS.pde == 'td_burgers':
-        _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
-    else:
-        _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
-
-
-    if FLAGS.load_model_from_expt is not None:
-        #model_dir = FLAGS.pde + "_leap_results"
-        #model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
-        model_path = FLAGS.load_model_from_expt
-        model_file = npo.array(
-            [f for f in os.listdir(model_path) if "nn_step" in f]
-        )
-        steps = npo.zeros_like(model_file, dtype=int)
-        for i, f in enumerate(model_file):
-            steps[i] = re.findall('[0-9]+', f)[-1]
-        model_file = model_file[
-            np.argsort(steps)[-1]
-        ]
-        log('load pre-trained model from file: ', model_file)
-        with open(os.path.join(model_path, model_file), 'rb') as f:
-            optimizer_target = pickle.load(f)
-
-        init_params = flax.serialization.from_state_dict(init_params, optimizer_target['params'])
-
-    #print(optimizer_target['params']['Dense_0'])
-    print(init_params['Dense_0'])
-
-    log(
-        'NN model:', jax.tree_map(lambda x: x.shape, init_params)
-    )
-
-    #for k, v in init_params.items():
-    #    if type(v) is not dict:
-    #        print(f" -> {k}: {v.shape}")
-    #    else:
-    #        print(f"   -> {k}")
-    #        for k2, v2 in v.items():
-    #            if type(v2) is not dict:
-    #                print(f"     -> {k2}: {v2.shape}")
-    #            else:
-    #                print(f"     -> {k2}")
-    #                for k3, v3 in v2.items():
-    #                    print(f"      i -> {k3}: {v3.shape}")
-
-    optimizer = trainer_util.get_optimizer(Field, init_params)
-
-    dummy_flat_grad, dummy_treedef = jax.tree_flatten(optimizer.target)
-    dummy_shapes = tuple(x.shape for x in dummy_flat_grad)
-    dummy_sizes = tuple(x.size for x in dummy_flat_grad)
-    fins = np.cumsum(np.array(dummy_sizes))
-    starts = fins - np.array(dummy_sizes)
-
-    fins = tuple(fins.tolist())
-    starts = tuple(starts.tolist())
-
-    @jax.jit
-    def reform(flat_arr):
-        out_list = []
-        for i in range(len(dummy_shapes)):
-            out_list.append(np.reshape(flat_arr[starts[i]:fins[i]],
-                                       dummy_shapes[i]))
-        return jax.tree_unflatten(dummy_treedef, out_list)
-
-    @jax.jit
-    def perform_pcgrad(loss_grads):
-        # define projection function
-        project = partial(pcgrad.project_grads, FLAGS.pcgrad_norm)
-
-        loss_grads_flat = {k: np.concatenate([arr.flatten() for arr in jax.tree_flatten(v)[0]])
-            for k, v in loss_grads.items()}
-        # for new individual loss gradient
-        loss_grads_new = {}
-
-        total_grad_new = 0.
-
-        # perform PC grad for each loss type
-        for k in loss_grads_flat:
-            grad = loss_grads_flat[k]
-            other_grads = {k1: v1 for k1, v1 in loss_grads_flat.items() if k1 != k}
-            loss_grad_new = project(grad, *other_grads.values())
-            # update the new projected individual loss function
-            loss_grads_new[k] = reform(loss_grad_new)
-
-            # update gradient for the entire loss function
-            total_grad_new = loss_grad_new + total_grad_new
-
-        total_grad_new = reform(total_grad_new)
-
-        return total_grad_new, loss_grads_new
-
-    @partial(jax.jit, static_argnums=[2])
-    def batch_loss_fn(key, model, bc_weights_prev):
+    def batch_loss_fn(key, model):
         vmap_task_loss_fn = jax.vmap(task_loss_fn, (0, None))
 
         keys = jax.random.split(key, FLAGS.bsize)
@@ -275,39 +126,13 @@ def main(argv):
         # get original gradients
         for k in loss_dict:
             loss_aux[k] = np.mean(loss_dict[k])
-            # do nothing if not annealing and not pcgrad-ing
-            if (not FLAGS.annealing and not FLAGS.pcgrad):
-                continue
-            #assert False
-            single_loss_fn = lambda model: np.mean(vmap_task_loss_fn(keys, model)[1][k])
-            _, loss_grad = jax.value_and_grad(single_loss_fn)(model)
-            loss_grads[k] = loss_grad
 
-        # perform PC grad
-        if FLAGS.pcgrad:
-            #assert False
-            # place holder for new total loss gradient
-            #total_grad_new = [np.zeros_like(x)
-            #                  for x in jax.tree_flatten(loss_grad)[0]]
-            # pdb.set_trace()
-            _, loss_grads = perform_pcgrad(loss_grads)
-
-        # perform weight annealing
-        if FLAGS.annealing:
-            bc_weights = perform_annealing(loss_grads, bc_weights_prev)
-            loss = np.sum(np.array([bc_weights[k] * v for k, v in loss_aux.items()]))
-        else:
-            bc_weights = None
-            loss = np.sum(np.array([v*(FLAGS.bc_weight if k not in FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
-
+        bc_weights = None
+        loss = np.sum(np.array([v*(FLAGS.bc_weight if k not in FLAGS.domain_loss else 1.) for k, v in loss_aux.items()]))
 
         return loss, (loss_aux, bc_weights)
 
-    #bc_weights = None
-
     # --------------------- Defining the evaluation functions --------------------
-
-
     def get_final_model(unused_key, model,
                          _unused_params=None,
                          _unused_num_steps=None,
@@ -315,43 +140,11 @@ def main(argv):
         # Input key is terminal
         return model
 
-    def get_final_model_old(unused_key, model,
-                         _unused_params=None,
-                         _unused_num_steps=None,
-                         _unused_meta_alg_def=None
-                         ):
-        """deprecated"""
-        if fa_p is not None:
-            def final_model(x):
-                velocity = model(x)
-                pressure = fa_p(x)
-                assembled = np.stack((velocity[:, 0], velocity[:, 1], pressure), axis=-1)
-                return assembled
-            return final_model
-        if FLAGS.pde == 'td_burgers':
-            def final_model(x):
-                if x.shape[-1] == 2:  # add time axis if missing time-dimension
-                    t_list = np.linspace(FLAGS.tmin, FLAGS.tmax, FLAGS.num_tsteps, endpoint=False)
-                    t_idx = npo.unique(npo.linspace(0, len(t_list), 2, endpoint=False, dtype=int)[1:])
-                    t_supp = np.squeeze(t_list[t_idx])
-                    print(f'plotting final model at t = {t_supp}')
-                    t_supp = np.repeat(t_supp, x.shape[0]).reshape(x.shape[0], 1)
-
-                    x = np.concatenate([x, t_supp], axis=1)
-                return model(x)
-
-            return final_model
-        else:
-            return model
-
-
     def make_coef_func(key, model, params, coords):
         # Input key is terminal
         final_model = get_final_model(key, model, params)
 
         return np.squeeze(final_model(coords))
-
-
 
     @jax.jit
     def train_step(key, optimizer, bc_weights_prev):
@@ -359,17 +152,16 @@ def main(argv):
         if FLAGS.optimizer == "adahessian":
             k1, k2 = jax.random.split(key)
             loss, (loss_aux, bc_weights) = batch_loss_fn(
-                k1, optimizer.target, bc_weights_prev)
+                k1, optimizer.target)
             batch_grad, batch_hess = grad_and_hessian(
-                lambda model: batch_loss_fn(k1, model, bc_weights)[0],
+                lambda model: batch_loss_fn(k1, model)[0],
                 (optimizer.target,),
                 k2,
             )
         else:
             (loss, (loss_aux, bc_weights)), batch_grad = jax.value_and_grad(
                 batch_loss_fn, argnums=1, has_aux=True
-            )(key, optimizer.target, bc_weights_prev)
-
+            )(key, optimizer.target)
 
         grad_norm = np.sqrt(
             jax.tree_util.tree_reduce(
@@ -398,24 +190,62 @@ def main(argv):
     def validation_losses(model):
         return task_loss_fn(jax.random.PRNGKey(0), model)[0]
 
+    # ----- initialize model  ----
+    with Timer() as initialization_time:
+        Field = pde.BaseField.partial(
+            sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
+            dense_args=(),
+            nonlinearity=np.sin if FLAGS.siren else nn.swish,
+            omega=FLAGS.siren_omega,
+            omega0=FLAGS.siren_omega0,
+            log_scale=FLAGS.log_scale,
+            use_laaf=FLAGS.laaf,
+            use_nlaaf=FLAGS.nlaaf,
+        )
+
+        key, subkey = jax.random.split(jax.random.PRNGKey(0))
+
+        if FLAGS.pde == 'td_burgers':
+            _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
+        else:
+            _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+
+        if FLAGS.load_model_from_expt is not None:
+            model_path = FLAGS.load_model_from_expt
+            model_file = npo.array(
+                [f for f in os.listdir(model_path) if "model_step" in f]
+            )
+            steps = npo.zeros_like(model_file, dtype=int)
+            for i, f in enumerate(model_file):
+                steps[i] = re.findall('[0-9]+', f)[-1]
+            model_file = model_file[
+                np.argsort(steps)[-1]
+            ]
+            log('load pre-trained model from file: ', model_file)
+            with open(os.path.join(model_path, model_file), 'rb') as f:
+                optimizer_target = pickle.load(f)
+
+            init_params = flax.serialization.from_state_dict(init_params, optimizer_target['params'])
+
+        optimizer = trainer_util.get_optimizer(Field, init_params)
+
+    print(init_params['Dense_0'])
+    log(
+        'NN model:', jax.tree_map(lambda x: x.shape, init_params)
+    )
+
+    # ----- sample param and get fenics ground truth -----
     key, gt_key, gt_points_key = jax.random.split(key, 3)
-    #print('sample param key: ', gt_key)
 
     gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
     gt_params = vmap(pde.sample_params)(gt_keys)
     print("gt_params: {}".format(gt_params))
-
 
     fenics_functions, fenics_vals, coords = trainer_util.get_ground_truth_points(
         pde, jax_tools.tree_unstack(gt_params), gt_points_key
     )
 
     if FLAGS.pde == 'td_burgers':
-        #FLAGS.tmax_nn = 1e-4
-        #early_stopping_tracker = deque()
-        #propagate_time = False
-        #last_prop_step = 0
-
         t_list = []
         for i in range(FLAGS.num_tsteps):
             tile_idx = coords.shape[1] // FLAGS.num_tsteps
@@ -424,41 +254,13 @@ def main(argv):
             t_list.append(np.squeeze(t_unique))
             assert len(t_unique) == 1
 
-    if FLAGS.pde == 'pressurefree_stokes':
-        assert len(fenics_functions) == 1
-        key, subkey = jax.random.split(key)
-        ground_truth = fenics_functions[0]
-        points = pde.sample_points(subkey,
-                                   3 * FLAGS.validation_points,
-                                   jax_tools.tree_unstack(gt_params)[0])
-        points = np.concatenate(points)
-        taylor_fn = pde.SecondOrderTaylorLookup(ground_truth, points, d=3)
-        fa_p = pde.get_p(taylor_fn)
-
-    else:
-        fa_p = None
-
-    # --------------------- Run MAML --------------------
-
+    # ----- train NN -----
     time_last_log = time.time()
-    #optimizer.target = flax.serialization.from_state_dict(optimizer.target, optimizer_target)
-
-    #print(optimizer_target['params']['Dense_0'])
     print(optimizer.target.params['Dense_0'])
     for step in range(FLAGS.outer_steps):
         key, subkey = jax.random.split(key)
         with Timer() as t:
             optimizer, loss, loss_aux, grad_norm, bc_weights = train_step(subkey, optimizer, None)
-
-        # increase NN domain every 100k steps or when we stop seeing val loss improvement
-        #if (FLAGS.pde == 'td_burgers') and (propagate_time) and (FLAGS.tmax_nn < FLAGS.tmax):
-        #    FLAGS.tmax_nn += (FLAGS.tmax - FLAGS.tmin) / FLAGS.num_tsteps
-        #    FLAGS.tmax_nn = np.clip(FLAGS.tmax_nn, a_max=FLAGS.tmax).astype(float)
-        #    log(f"Passing new t max to NN: {FLAGS.tmax_nn}")
-        #    logging.info(f"Passing new t max to NN: {FLAGS.tmax_nn}")
-        #    last_prop_step = step
-        #    propagate_time = False
-        #    sys.stdout.flush()
 
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
@@ -472,11 +274,6 @@ def main(argv):
             loss_vals_and_grad_norms = {k: (float(v[0]), float(v[1]))
                                         for k, v in loss_vals_and_grad_norms.items()}
             log("loss vals and grad norms: ", loss_vals_and_grad_norms)
-            if FLAGS.annealing:
-                bc_weights = {k: float(v) for k, v in bc_weights.items()}
-                log(f"bc weigths for annealing (l2={FLAGS.annealing_l2}): ", bc_weights)
-                if step > 0:
-                    assert(bc_weights != None )
 
             if tflogger is not None:
                 for k in loss_vals_and_grad_norms:
@@ -505,6 +302,15 @@ def main(argv):
                         _params,
                     )
                 )(_all_points)
+
+                _, _domain_losses_domain = jax.vmap(
+                    lambda x: pde.loss_fn(
+                        optimizer.target,
+                        (x.reshape(1, -1) for _ in range(len(_points))),
+                        _params,
+                    )
+                )(np.squeeze(coords))
+
                 _all_losses = {**_boundary_losses, **_domain_losses}
                 for _losskey in _all_losses:
                     # print(_losskey)
@@ -581,6 +387,42 @@ def main(argv):
                         "Residual_on_coords dim {}".format(dim), [plt.gcf()], step
                     )
 
+                _domain_losses_domain = {**_domain_losses_domain}
+                for _losskey in _domain_losses_domain:
+                    _loss = _domain_losses_domain[_losskey]
+                    # print(_loss.shape)
+                    while len(_loss.shape) > 1:
+                        _loss = _loss.mean(axis=1)
+
+                    tmp_filenames = []
+                    for i, domain_t in enumerate(t_list):
+                        plt.figure(figsize=(20, 8))
+                        plt.subplot(1, 2, 1)
+                        _coords_index = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
+                        #_coords_index = np.isclose(np.squeeze(coords)[:, 2], domain_t)
+                        clrs = plt.scatter(
+                            coords[0][_coords_index, 0], coords[0][_coords_index, 1],
+                            c=np.log(_loss[_coords_index]),
+                        )
+                        plt.colorbar(clrs)
+                        plt.title(f"t = Validation Loss {domain_t:.3f}")
+
+                        mse_to_plot = np.linalg.norm((fenics_vals[0] - _outputs_on_coords), axis=1)
+                        plt.subplot(1,2,2)
+                        clrs = plt.scatter(
+                            coords[0][_coords_index, 0], coords[0][_coords_index, 1],
+                            c=mse_to_plot[_coords_index]
+                        )
+                        plt.colorbar(clrs)
+                        plt.title(f"t = Residual {domain_t:.3f}")
+
+                        plt.savefig(f"td_burger_errors_{i}.png")
+                        tmp_filenames.append(f"td_burger_errors_{i}.png")
+                        # tflogger.log_plots("Validation Loss in {}".format(domain_t), [plt.gcf()], step)
+
+                    gif_out = os.path.join(path, "td_burger_errors_step_{}.gif".format(step))
+                    pde.build_gif(tmp_filenames, outfile=gif_out)
+
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
                 mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = trainer_util.vmap_validation_error(
@@ -591,26 +433,16 @@ def main(argv):
 
             val_loss = validation_losses(optimizer.target)
 
-            #if FLAGS.pde == 'td_burgers' and len(early_stopping_tracker) == 3:
-            #    improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
-            #    _ = early_stopping_tracker.popleft()
-            #    if (improve_pct < FLAGS.propagatetime_rel) and (step - last_prop_step) >= (FLAGS.propagatetime_max // 2):
-            #        propagate_time = True
-            #    elif (step - last_prop_step) >= FLAGS.propagatetime_max:
-            #        propagate_time = True
-            #if FLAGS.pde == 'td_burgers':
-            #    early_stopping_tracker.append(val_loss)
-
-        # if step % FLAGS.log_every == 0:
             if step > 0:
-                log("time {} steps: {}".format(FLAGS.log_every,
+                log("total time {} steps: {}".format(FLAGS.log_every,
                                                time.time() - time_last_log))
             time_last_log = time.time()
 
             log(
                 "step: {}, loss: {}, val_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
-                "per_dim_rel_err: {}, deployment_time: {}, grad_norm: {}, per_time_step_error: {} ,time: {}".format(
+                "per_dim_rel_err: {}, deployment_time: {}, grad_norm: {}, "
+                "per_time_step_error: {} ,per train step time: {}".format(
                     step,
                     loss,
                     val_loss,
@@ -668,7 +500,6 @@ def main(argv):
                         if 'scale' in k:
                             print("Scale params: {}: {}".format(k, v))
 
-
             log("time for logging {}".format(time.time() - time_last_log))
             time_last_log = time.time()
 
@@ -723,7 +554,6 @@ def main(argv):
         plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
     else:
         plt.show()
-
 
 if __name__ == "__main__":
     app.run(main)

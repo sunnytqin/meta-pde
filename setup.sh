@@ -2,7 +2,7 @@
 # It takes 5-10 minutes, so then go get a coffee.
 conda deactivate
 conda remove --name meta-pde --all
-conda create -n meta-pde python==3.8
+conda create -n meta-pde python==3.9
 conda activate meta-pde
 # conda install -c conda-forge dolfin-adjoint==2019.1.0
 conda install -c conda-forge mshr=2019.1.0=*_4
