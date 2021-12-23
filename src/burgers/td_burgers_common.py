@@ -4,14 +4,12 @@ import numpy as npo
 import pdb
 from functools import partial
 import argparse
-from collections import namedtuple
 
-from jax.config import config
-# config.update('jax_disable_jit', True)
 
 import matplotlib.pyplot as plt
 
 import fenics as fa
+import importlib
 
 from ..nets.field import (
     vmap_divergence,
@@ -97,56 +95,10 @@ def loss_domain_fn(field_fn, points_in_domain, params):
     return (jax.vmap(lhs_fn)(points_in_domain) - jax.vmap(rhs_fn)(points_in_domain))**2
 
 
-def loss_vertical_fn(field_fn, points_on_vertical, params):
-    source_params, bc_params, per_hole_params, n_holes = params
-
-    A0 = (bc_params[0, 0]).astype(float)
-    A1 = (bc_params[0, 1]).astype(float)
-    A2 = (bc_params[0, 2]).astype(float)
-    sinusoidal_magnitude_x = A0 * \
-                             np.sin(A2 * np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.cos(A2 * np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    sinusoidal_magnitude_y = A1 * \
-                             np.cos(A2 * np.pi * (points_on_vertical[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.sin(A2 * np.pi * (points_on_vertical[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    #zero_magnitude = np.zeros_like(sinusoidal_magnitude)
-    
-    return (field_fn(points_on_vertical) - np.stack((sinusoidal_magnitude_x, sinusoidal_magnitude_y), axis=-1)) ** 2
-
-
-def loss_horizontal_fn(field_fn, points_on_horizontal, params):
-    source_params, bc_params, per_hole_params, n_holes = params
-
-    A0 = (bc_params[0, 0]).astype(float)
-    A1 = (bc_params[0, 1]).astype(float)
-    A2 = (bc_params[0, 2]).astype(float)
-    
-    sinusoidal_magnitude_x = A0 * \
-                             np.sin(A2 * np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.cos(A2 * np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    sinusoidal_magnitude_y = A1 * \
-                             np.cos(A2 * np.pi * (points_on_horizontal[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.sin(A2 * np.pi * (points_on_horizontal[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    #zero_magnitude = np.zeros_like(sinusoidal_magnitude)
-
-    return (field_fn(points_on_horizontal) - np.stack((sinusoidal_magnitude_x, sinusoidal_magnitude_y), axis=-1)) ** 2
-
-
-def loss_initial_fn(field_fn, points_initial, params):
-    source_params, bc_params, per_hole_params, n_holes = params
-
-    A0 = (bc_params[0, 0]).astype(float)
-    A1 = (bc_params[0, 1]).astype(float)
-    A2 = (bc_params[0, 2]).astype(float)
-    sinusoidal_magnitude_x = A0 * \
-                             np.sin(A2 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.cos(A2 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    sinusoidal_magnitude_y = A1 * \
-                             np.cos(A2 * np.pi * (points_initial[:, 0] - FLAGS.xmin) / (FLAGS.xmax - FLAGS.xmin)) * \
-                             np.sin(A2 * np.pi * (points_initial[:, 1] - FLAGS.ymin) / (FLAGS.ymax - FLAGS.ymin))
-    return (field_fn(points_initial) -
-            np.stack((sinusoidal_magnitude_x, sinusoidal_magnitude_y), axis=-1)) ** 2
-
+loss_fn_lib = importlib.import_module('.burgers_formulation.default', package='src.burgers')
+loss_initial_fn = loss_fn_lib.loss_initial_fn
+loss_vertical_fn = loss_fn_lib.loss_vertical_fn
+loss_horizontal_fn = loss_fn_lib.loss_horizontal_fn
 
 def loss_time_scale(field_fn, points_in_domain, params):
 
@@ -180,6 +132,7 @@ def loss_time_scale(field_fn, points_in_domain, params):
 
     # compare model value with taylor expanded val
     return (jax.vmap(model_val)(points_in_domain) - jax.vmap(taylor_val)(points_in_domain)) ** 2
+
 
 def loss_fn(field_fn, points, params):
     (
@@ -233,7 +186,7 @@ def sample_params(key):
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 1, )) - 1.)
 
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-             k2, minval=1.4, maxval=1.5, shape=(1, 1,)
+             k2, minval=1.0, maxval=1.5, shape=(1, 1,)
         )
 
         bc_params = np.concatenate([bc_params_magnitude, bc_params_magnitude, bc_params_scale], axis=1)
@@ -243,7 +196,7 @@ def sample_params(key):
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 2, )) - 1.)
 
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=0.1, maxval=2.0, shape=(1, 1,)
+            k2, minval=1.0, maxval=1.5, shape=(1, 1,)
         )
         bc_params = np.concatenate([bc_params_magnitude, bc_params_scale], axis=1)
 

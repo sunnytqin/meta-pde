@@ -13,9 +13,9 @@ from .td_burgers_common import (
     sample_points_in_domain,
     sample_points_initial,
 )
-from .td_burgers_fenics import build_gif
+from .td_burgers_fenics_exact1 import build_gif
 
-from .td_burgers_fenics import (solve_fenics, GroundTruth)
+from .td_burgers_fenics_exact1 import (solve_fenics, GroundTruth)
 
 dim = 2
 
