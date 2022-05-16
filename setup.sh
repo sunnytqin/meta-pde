@@ -14,5 +14,4 @@ pip install --upgrade pip
 pip install --upgrade jax jaxlib==0.1.65+cuda111 -f https://storage.googleapis.com/jax-releases/jax_releases.html
 pip install flax
 pip install git+https://github.com/nestordemeure/flaxOptimizers.git
-pip install git+https://github.com/nestordemeure/AdaHessianJax.git
 

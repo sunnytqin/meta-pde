@@ -124,19 +124,9 @@ def main(argv):
 
     @jax.jit
     def train_step(key, optimizer):
-
-        if FLAGS.optimizer == "adahessian":
-            k1, k2 = jax.random.split(key)
-            loss, loss_aux = batch_loss_fn(k1, optimizer.target)
-            batch_grad, batch_hess = grad_and_hessian(
-                lambda model: batch_loss_fn(k1, model)[0],
-                (optimizer.target,),
-                k2,
-            )
-        else:
-            (loss, loss_aux), batch_grad = jax.value_and_grad(
-                batch_loss_fn, argnums=1, has_aux=True
-            )(key, optimizer.target)
+        (loss, loss_aux), batch_grad = jax.value_and_grad(
+            batch_loss_fn, argnums=1, has_aux=True
+        )(key, optimizer.target)
 
         grad_norm = np.sqrt(
             jax.tree_util.tree_reduce(

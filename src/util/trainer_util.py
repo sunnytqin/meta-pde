@@ -17,7 +17,6 @@ import shutil
 from .tensorboard_logger import Logger as TFLogger
 
 import flaxOptimizers
-from adahessianJax.flaxOptimizer import Adahessian
 from functools import partial
 
 import fenics as fa
@@ -595,12 +594,6 @@ def get_optimizer(model_class, init_params):
     elif FLAGS.optimizer == "sgd":
         optimizer = flax.optim.Momentum(learning_rate=FLAGS.outer_lr, beta=0.0).create(
             flax.nn.Model(model_class, init_params))
-    elif FLAGS.optimizer == "adahessian":
-        raise Exception("Adahessian currently doesnt work with jitting whole train "
-                        "loop or with maml/leap")
-        #optimizer = Adahessian(learning_rate=FLAGS.outer_lr, beta2=0.95).create(
-        #    flax.nn.Model(model_class, init_params)
-        #)
     else:
         raise Exception("unknown optimizer: ", FLAGS.optimizer)
 
