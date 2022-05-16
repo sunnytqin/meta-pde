@@ -88,23 +88,35 @@ def sample_points_on_boundary(key, n, params):
     return np.stack([x, y], axis=1)
 
 
+def is_in_hole(xy, geo_params, tol=1e-7):
+    c1, c2 = geo_params
+    vector = xy
+    theta = np.arctan2(*vector)
+    length = np.linalg.norm(vector)
+    r0 = 1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta)
+    return r0 < length + tol
+
+
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_in_domain(key, n, params):
     _, _, geo_params = params
-    c1, c2 = geo_params
-    key1, key2, key3 = jax.random.split(key, 3)
-    theta = np.linspace(0.0, 2 * np.pi, n)
-    theta = theta + jax.random.uniform(
-        key1, minval=0.0, maxval=(2 * np.pi / n), shape=(n,)
-    )
-    r0 = 1.0 + c1 * np.cos(4 * theta) + c2 * np.cos(8 * theta)
-    dr = np.linspace(0.0, 1.0 - 1.0 / n, n)
-    dr = jax.random.permutation(key2, dr)
-    dr = dr + jax.random.uniform(key3, minval=0.0, maxval=1.0 / n, shape=(n,))
-    r = dr * r0
-    x = r * np.cos(theta)
-    y = r * np.sin(theta)
-    return np.stack([x, y], axis=1)
+    k1, k2, k3 = jax.random.split(key, 3)
+    # total number of points is 3 * n
+    # so as long as the fraction of volume covered is << 1/3 we are ok
+    n_x = 3 * n
+    n_y = 3 * n
+
+    xs = jax.random.uniform(k1, (n_x, ), minval=FLAGS.xmin, maxval=FLAGS.xmax)
+    ys = jax.random.uniform(k2, (n_y, ), minval=FLAGS.ymin, maxval=FLAGS.ymax)
+
+    xy = np.stack((xs.flatten(), ys.flatten()), axis=1)
+
+    in_hole = jax.vmap(
+        is_in_hole, in_axes=(0, None), out_axes=0
+    )(xy, geo_params)
+
+    idxs = jax.random.choice(k3, xy.shape[0], replace=False, p=1 - in_hole, shape=(n,))
+    return xy[idxs]
 
 
 @jax.jit

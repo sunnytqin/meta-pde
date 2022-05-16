@@ -67,7 +67,7 @@ def maml_inner_step(key, opt, inner_loss_fn, inner_lr,
         lambda *args: inner_loss_fn(*args), argnums=1, has_aux=True
     )
 
-    loss, grad = loss_and_grad_fn(key, opt.target)
+    (loss, _), grad = loss_and_grad_fn(key, opt.target)
 
     maybe_softplus = lambda x: jax.nn.softplus(x) if softplus_lrs else x
 
@@ -128,7 +128,7 @@ def single_task_rollout(
     else:
         assert inner_steps == -1
 
-    @jax.checkpoint
+    #@jax.checkpoint
     def body_fn(carry, lr):
         opt, key, meta_loss = carry
         k1, k2, k3 = jax.random.split(key, 3)
@@ -155,7 +155,7 @@ def single_task_rollout(
     )
 
     # Cat the final loss to loss array (to have losses before and after each grad step)
-    loss_final = inner_loss_fn(final_key, final_opt.target)
+    loss_final, _ = inner_loss_fn(final_key, final_opt.target)
     # pdb.set_trace()
 
     # losses = np.concatenate((losses, np.array(loss_final)))

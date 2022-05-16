@@ -59,9 +59,6 @@ def main(argv):
     if FLAGS.out_dir is None:
         FLAGS.out_dir = FLAGS.pde + "_leap_results"
 
-    if FLAGS.load_model_from_expt is not None:
-        FLAGS.out_dir = os.path.join(FLAGS.out_dir, 'rerun')
-
     pde = get_pde(FLAGS.pde)
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
@@ -80,27 +77,7 @@ def main(argv):
             np.array([bl for bl in boundary_losses.values()])
         ) + np.sum(np.array([dl for dl in domain_losses.values()]))
 
-        if FLAGS.laaf:
-            assert not FLAGS.nlaaf
-            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_laaf(field_fn)
-            laaf_loss_dict = {'laaf_loss': laaf_loss}
-
-            # recompute loss
-            loss = loss + laaf_loss
-
-        elif FLAGS.nlaaf:
-            assert not FLAGS.laaf
-            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_nlaaf(field_fn)
-            laaf_loss_dict = {'laaf_loss': laaf_loss}
-
-            # recompute loss
-            loss = loss + laaf_loss
-
-        # return the total loss, and as aux a dict of individual losses
-        if FLAGS.laaf or FLAGS.nlaaf:
-            return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
-        else:
-            return loss, {**boundary_losses, **domain_losses}
+        return loss, {**boundary_losses, **domain_losses}
 
     def make_task_loss_fn(key):
         # The input key is terminal
@@ -113,6 +90,7 @@ def main(argv):
         return variational_energy_estimator
 
     #make_inner_opt = flax.optim.Momentum(learning_rate=FLAGS.inner_lr, beta=0.0).create
+    #make_inner_opt = flax.optim.GradientDescent(learning_rate=FLAGS.inner_lr).create
     make_inner_opt = flax.optim.Adam(learning_rate=FLAGS.inner_lr, beta1=0.9, beta2=0.99).create
 
     leap_def = leap.LeapDef(
@@ -132,22 +110,16 @@ def main(argv):
         omega=FLAGS.siren_omega,
         omega0=FLAGS.siren_omega0,
         log_scale=FLAGS.log_scale,
-        use_laaf=FLAGS.laaf,
-        use_nlaaf=FLAGS.nlaaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    if FLAGS.pde == 'td_burgers':
-        _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
-    else:
-        _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+    _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
     if FLAGS.load_model_from_expt is not None:
-        model_dir = FLAGS.pde + "_leap_results"
-        model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
+        model_path = FLAGS.load_model_from_expt
         model_file = npo.array(
-            [f for f in os.listdir(model_path) if "leap_step" in f]
+            [f for f in os.listdir(model_path) if "model_step" in f]
         )
         steps = npo.zeros_like(model_file, dtype=int)
         for i, f in enumerate(model_file):
@@ -156,28 +128,19 @@ def main(argv):
             np.argsort(steps)[-1]
         ]
         log('load pre-trained model from file: ', model_file)
-        with open(os.path.join(model_path, model_file), 'r') as f:
-            optimizer_target_prev = f.read()
-        init_params = flax.serialization.from_state_dict(init_params, optimizer_target_prev)
+        with open(os.path.join(model_path, model_file), 'rb') as f:
+            optimizer_target = pickle.load(f)
+        init_params = flax.serialization.from_state_dict(init_params, optimizer_target['params'])
 
+    optimizer = trainer_util.get_optimizer(Field, init_params)
+
+    try:
+        print(init_params['Dense_0'])
+    except:
+        print(init_params['0']['Dense_0'])
     log(
         'NN model:', jax.tree_map(lambda x: x.shape, init_params)
     )
-
-    #for k, v in init_params.items():
-    #    if type(v) is not dict:
-    #        print(f"-> {k}: {v.shape}")
-    #    else:
-    #        print(f"-> {k}")
-    #        for k2, v2 in v.items():
-    #            if type(v2) is not dict:
-    #                print(f"  -> {k2}: {v2.shape}")
-    #            else:
-    #                print(f"  -> {k2}")
-    #                for k3, v3 in v2.items():
-    #                    print(f"    -> {k3}: {v3.shape}")
-
-    optimizer = trainer_util.get_optimizer(Field, init_params)
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -238,7 +201,6 @@ def main(argv):
         optimizer = optimizer.apply_gradient(meta_grad)
         return optimizer, losses, meta_grad_norm
 
-
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 
     gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
@@ -250,14 +212,7 @@ def main(argv):
     )
 
     if FLAGS.pde == 'td_burgers':
-        t_list = []
-        for i in range(FLAGS.num_tsteps):
-            tile_idx = coords.shape[1] // FLAGS.num_tsteps
-            t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
-            t_unique = np.unique(coords[:, t_idx, 2])
-            t_list.append(np.squeeze(t_unique))
-            assert len(t_unique) == 1
-
+        t_list = fenics_functions[0].timesteps_list
     time_last_log = time.time()
 
     # --------------------- Run LEAP --------------------
@@ -270,9 +225,6 @@ def main(argv):
 
         if np.isnan(np.mean(losses[0][:, -1])):
             log("encountered nan at at step {}".format(step))
-            # save final model
-            #with open(os.path.join(path, "leap_step_final.txt".format(step)), "w") as f:
-            #    f.write(optimizer_target_prev)
             break
 
         if step % FLAGS.log_every == 0:
@@ -285,8 +237,6 @@ def main(argv):
             deployment_time = deploy_timer.interval / FLAGS.n_eval
 
             val_losses = validation_losses(optimizer.target)
-
-            #optimizer_target_prev = flax.serialization.to_state_dict(optimizer.target)
 
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
@@ -401,25 +351,9 @@ def main(argv):
                         tflogger.log_histogram("Param: " + k, v.flatten(), step)
 
         if FLAGS.viz_every > 0 and step % FLAGS.viz_every == 0:
-            plt.figure()
-            # pdb.set_trace()
-            trainer_util.compare_plots_with_ground_truth(
-                optimizer.target,
-                pde,
-                fenics_functions,
-                gt_params,
-                get_final_model,
-                leap_def,
-                FLAGS.inner_steps,
-            )
-            if FLAGS.expt_name is not None:
-                plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
-
-            if tflogger is not None:
-                tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
-
             if FLAGS.pde == 'td_burgers':
-                tmp_filenames = trainer_util.plot_model_time_series(
+                plt.figure()
+                trainer_util.plot_model_time_series_new(
                     optimizer.target,
                     pde,
                     fenics_functions,
@@ -428,8 +362,25 @@ def main(argv):
                     leap_def,
                     FLAGS.inner_steps,
                 )
-                gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
-                pde.build_gif(tmp_filenames, outfile=gif_out)
+                if FLAGS.expt_name is not None:
+                    plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
+            else:
+                plt.figure()
+                # pdb.set_trace()
+                trainer_util.compare_plots_with_ground_truth(
+                    optimizer.target,
+                    pde,
+                    fenics_functions,
+                    gt_params,
+                    get_final_model,
+                    leap_def,
+                    FLAGS.inner_steps,
+                )
+                if FLAGS.expt_name is not None:
+                    plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
+
+            if tflogger is not None:
+                tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
             # save model
             optimizer_target = flax.serialization.to_state_dict(optimizer.target)

@@ -25,7 +25,7 @@ import dolfin
 import imageio
 
 from . import jax_tools
-
+import copy
 import pdb
 
 import absl
@@ -59,24 +59,18 @@ def get_ground_truth_points(
         )
         k1, k2 = jax.random.split(key)
         fn_coords = pde.sample_points_in_domain(k1, FLAGS.validation_points, params)
+        #fn_coords = np.concatenate(pde.sample_points(k1, FLAGS.validation_points, params))
         if FLAGS.pde == 'td_burgers':
             # replace random time sampling with fenics val sampled time
-            tile_idx = FLAGS.validation_points // (FLAGS.num_tsteps - 1)
-            if FLAGS.num_tsteps > 2:
-                assert (fn_coords[0: tile_idx, 0: -1] ==
-                        fn_coords[tile_idx: 2 * tile_idx, 0: -1]).all()
-                assert FLAGS.num_tsteps == ground_truth.tsteps
-            fn_coords = np.concatenate([fn_coords[0: tile_idx, :]
-                                        for _ in range(ground_truth.tsteps)])
-            time_axis = np.repeat(
-                np.array(ground_truth.timesteps_list).reshape(-1, 1),
+            tile_idx = (FLAGS.validation_points // FLAGS.num_tsteps) + 1
+            time_axis = np.tile(
+                np.array(ground_truth.timesteps_list),
                 tile_idx,
-                axis=0
-            )
-            fn_coords = np.concatenate([fn_coords[:, :-1], time_axis], axis=1)
+            )[0: fn_coords.shape[0]]
+            fn_coords = np.concatenate([fn_coords[:, :-1], time_axis[:, None]], axis=1)
 
         ground_truth.set_allow_extrapolation(True)
-        coefs.append(np.array([ground_truth(x) for x in fn_coords]))
+        coefs.append(np.array([ground_truth(x) for x in fn_coords])[:, None])
         coords.append(fn_coords)
         ground_truth.set_allow_extrapolation(False)
         fenics_functions.append(ground_truth)
@@ -226,10 +220,10 @@ def compare_plots_with_ground_truth(
         steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
         for j, step in enumerate(steps_plot): #range(0, inner_steps + 1):
             plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
-            plt.xlim([min(FLAGS.xmin * 0.8, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.2),
-                          FLAGS.xmax * 1.1])
-            plt.ylim([min(FLAGS.ymin * 0.8, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.2),
-                          FLAGS.ymax * 1.1])
+            plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
+                      FLAGS.xmax * 1.1])
+            plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
+                      FLAGS.ymax * 1.1])
 
             final_model = get_final_model(
                 keys[i], model, params_list[i], step, meta_alg_def,
@@ -249,6 +243,23 @@ def compare_plots_with_ground_truth(
                 coords_t = np.concatenate([coords, t_supp], axis=1)
 
                 dofs = final_model(np.array(coords_t))
+            elif FLAGS.pde == 'hyper_elasticity':
+                ground_truth_vals = np.array([ground_truth(x) for x in coords])
+                dofs_left = final_model(np.array(coords))
+                mse_left = np.mean((dofs_left - ground_truth_vals) ** 2)
+                
+                coords_right = np.array(coords)
+                coords_right = coords_right.at[:, 0].set(1. - coords_right.at[:, 0].get())
+                dofs_right = final_model(np.array(coords_right))
+                dofs_right = dofs_right.at[:, 0].multiply(-1.)
+                mse_right = np.mean((dofs_right - ground_truth_vals) ** 2)
+
+                dofs = jax.lax.cond(
+                    mse_left > mse_right,
+                    lambda _: dofs_right,
+                    lambda _: dofs_left,
+                    None
+                )
             else:
                 dofs = final_model(np.array(coords))
 
@@ -282,6 +293,7 @@ def compare_plots_with_ground_truth(
             else:
                 plt.axis("off")
 
+
 def plot_model_time_series(
     model,
     pde,
@@ -309,8 +321,8 @@ def plot_model_time_series(
                 plt.axis("off")
             plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
                       FLAGS.xmax * 1.1])
-            plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
-                      FLAGS.ymax * 1.1])
+            #plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
+            #          FLAGS.ymax * 1.1])
 
             ground_truth.set_allow_extrapolation(False)
             t_val = ground_truth.timesteps_list[t]
@@ -321,7 +333,10 @@ def plot_model_time_series(
             steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
             for j, step in enumerate(steps_plot):
                 plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
-                plt.axis("off")
+                plt.xlim([min(FLAGS.xmin * 0.9, FLAGS.xmin - (FLAGS.xmax - FLAGS.xmin) * 0.1),
+                          FLAGS.xmax * 1.1])
+                #plt.ylim([min(FLAGS.ymin * 0.9, FLAGS.ymin - (FLAGS.ymax - FLAGS.ymin) * 0.1),
+                #          FLAGS.ymax * 1.1])
 
                 final_model = get_final_model(
                     keys[i], model, params_list[i], j, meta_alg_def,
@@ -373,6 +388,90 @@ def plot_model_time_series(
     return tmp_filenames
 
 
+def plot_model_time_series_new(
+    model,
+    pde,
+    fenics_functions,
+    params_stacked,
+    get_final_model,
+    meta_alg_def,
+    inner_steps,
+):
+    """plot time series 2d
+    """
+    keys = jax.random.split(jax.random.PRNGKey(0), len(fenics_functions))
+    N = len(fenics_functions)
+
+    params_list = jax_tools.tree_unstack(params_stacked)
+
+    for i in range(min([N, 8])):  # Don't plot more than 8 PDEs for legibility
+        ground_truth = fenics_functions[i]
+        plt_inner_steps = min(max(inner_steps, 1), 5)
+        plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + i)
+        if N > 1:
+            plt.axis("off")
+
+        fenics_vals = []
+        for t in range(FLAGS.num_tsteps):
+            ground_truth.set_allow_extrapolation(True)
+            x_coords = np.linspace(FLAGS.xmin, FLAGS.xmax, FLAGS.validation_points)
+
+            fenics_vals.append(
+                np.array([ground_truth[t](xi) for xi in x_coords])
+            )
+        fenics_vals = np.array(fenics_vals)
+        clr = plt.imshow(fenics_vals.T, cmap='rainbow', interpolation='none', aspect='auto')
+        plt.xticks(np.linspace(0, FLAGS.num_tsteps, 11), np.linspace(0, FLAGS.tmax, 11), fontsize=4)
+        plt.yticks(np.linspace(0, FLAGS.validation_points, 11), np.linspace(FLAGS.xmin, FLAGS.xmax, 11), fontsize=4)
+        plt.ylabel('position', fontsize=4)
+        cbar = plt.colorbar(clr)
+        cbar.ax.tick_params(labelsize=4)
+        if i == 0:
+            plt.title("Truth", fontsize=6)
+
+        steps_plot = np.linspace(0, inner_steps, plt_inner_steps, dtype=int)
+        for j, step in enumerate(steps_plot):
+            model_vals = []
+            plt.subplot(plt_inner_steps + 1, min([N, 8]), 1 + min([N, 8]) * (j + 1) + i)
+            for t in range(FLAGS.num_tsteps):
+                final_model = get_final_model(
+                    keys[i], model, params_list[i], j, meta_alg_def,
+                )
+                # add time dimension
+                t_val = ground_truth.timesteps_list[t]
+                t_val_expand = np.repeat(t_val, len(x_coords)).reshape(-1, 1)
+                coords = np.concatenate([x_coords[:, None], t_val_expand], axis=1)
+
+                model_vals.append(final_model(np.array(coords)))
+
+            model_vals = np.array(model_vals)
+            clr = plt.imshow(model_vals.T, cmap='rainbow', interpolation='none', aspect='auto')
+            plt.xticks(np.linspace(0, FLAGS.num_tsteps, 11), np.linspace(0, FLAGS.tmax, 11), fontsize=4)
+            plt.xlabel('Time (s)', fontsize=4)
+            plt.yticks(np.linspace(0, FLAGS.validation_points, 11), np.linspace(FLAGS.xmin, FLAGS.xmax, 11), fontsize=4)
+            plt.ylabel('position', fontsize=4)
+            cbar = plt.colorbar(clr)
+            cbar.ax.tick_params(labelsize=4)
+
+            if (i == 0) and (j == 0):
+                plt.title("NN Model", fontsize=4)
+                if N > 1:
+                    plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                    plt.ylabel(f"Step {step}", fontsize=4)
+                else:
+                    plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
+            elif i == 0:
+                if N > 1:
+                    plt.tick_params(axis='both', length=0, labelsize=1, colors='white')
+                    plt.ylabel(f"Step {step}", fontsize=4)
+                else:
+                    plt.tick_params(axis='both', length=0, labelsize=5, colors='black')
+            else:
+                plt.axis("off")
+
+    return
+
+
 def prepare_logging(out_dir, expt_name):
     if expt_name is not None:
         if not os.path.exists(out_dir):
@@ -412,17 +511,6 @@ def vmap_validation_error(
         keys, model, ground_truth_params, points
     )
 
-    #if type(model) == tuple and fa_p is None:
-    #    coefs = vmap(make_coef_func, (0, None, 0, 0))(
-    #        keys, model, ground_truth_params, points
-    #    )
-    #else:
-    #    make_coef_func_partial = jax.jit(partial(make_coef_func, model=model, fa_p=fa_p))
-
-    #    coefs = vmap(make_coef_func_partial, (0, 0, 0))(
-    #        keys, ground_truth_params, points
-    #    )
-
     coefs = coefs.reshape(coefs.shape[0], coefs.shape[1], -1)
     ground_truth_vals = ground_truth_vals.reshape(coefs.shape)
     # if linear stokes, center mean pressure to 0 before comparing
@@ -436,6 +524,32 @@ def vmap_validation_error(
         normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
         rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
 
+    elif FLAGS.pde == 'hyper_elasticity':
+        err_left = coefs - ground_truth_vals
+        mse_left = np.mean(err_left ** 2, axis=[1, 2]).reshape(-1, 1)
+
+        points_right = np.array(points)
+        points_right = points_right.at[:, :, 0].set(1. - points_right.at[:, :, 0].get())
+        coefs_right = vmap(make_coef_func, (0, None, 0, 0))(
+                keys, model, ground_truth_params, points_right
+                )
+        coefs_right = coefs_right.at[:, :, 0].multiply(-1.)
+        err_right = coefs_right - ground_truth_vals
+        mse_right = np.mean(err_right ** 2, axis=[1, 2]).reshape(-1, 1)
+
+        def take_min(mse_left, mse_right, err_left, err_right):
+            err, mse = jax.lax.cond(
+                np.squeeze(mse_left) > np.squeeze(mse_right),
+                lambda _: (err_right, mse_left),
+                lambda _: (err_left, mse_left),
+                None
+            )
+            return err, mse
+        err, mse = jax.vmap(take_min, (0, 0, 0, 0))(mse_left, mse_right, err_left, err_right)
+        mse = np.sum(mse)
+        normalizer = np.mean(ground_truth_vals ** 2, axis=1, keepdims=True)
+        rel_sq_err = err ** 2 / normalizer.mean(axis=2, keepdims=True)
+
     else:
         err = coefs - ground_truth_vals
         mse = np.mean(err ** 2)
@@ -444,13 +558,15 @@ def vmap_validation_error(
 
     # if contains time dimension, add per time-stepping validation error
     if FLAGS.pde == 'td_burgers':
-        assert points.shape[-1] == 3
+        assert points.shape[-1] == 2
         t_rel_sq_err = []
-        tile_idx = points.shape[1] // FLAGS.num_tsteps
+        tile_idx = (points.shape[1] // FLAGS.num_tsteps)
+        t_idx = np.arange(0, tile_idx) * FLAGS.num_tsteps
         for i in range(FLAGS.num_tsteps):
-            t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
-            t_err = err[:, t_idx, :]
-            t_normalizer = np.mean(ground_truth_vals[:, t_idx, :] ** 2, axis=1, keepdims=True)
+            t_idx_i = t_idx + i
+            #t_idx = np.arange(i * tile_idx, (i + 1) * tile_idx)
+            t_err = err[:, t_idx_i, :]
+            t_normalizer = np.mean(ground_truth_vals[:, t_idx_i, :] ** 2, axis=1, keepdims=True)
             t_rel_sq_err.append(np.mean(t_err ** 2 / t_normalizer.mean(axis=2, keepdims=True)))
 
     return (
@@ -465,7 +581,7 @@ def vmap_validation_error(
 
 def get_optimizer(model_class, init_params):
     if FLAGS.optimizer == "adam":
-        optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta1=0.8, beta2=0.9).create(
+        optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta1=0.9, beta2=0.99).create(
             flax.nn.Model(model_class, init_params)
         )
     elif FLAGS.optimizer == "rmsprop":
@@ -476,7 +592,9 @@ def get_optimizer(model_class, init_params):
         optimizer = flaxOptimizers.Ranger(
             learning_rate=FLAGS.outer_lr, beta2=0.99, use_gc=False
         ).create(flax.nn.Model(model_class, init_params))
-
+    elif FLAGS.optimizer == "sgd":
+        optimizer = flax.optim.Momentum(learning_rate=FLAGS.outer_lr, beta=0.0).create(
+            flax.nn.Model(model_class, init_params))
     elif FLAGS.optimizer == "adahessian":
         raise Exception("Adahessian currently doesnt work with jitting whole train "
                         "loop or with maml/leap")
@@ -487,46 +605,3 @@ def get_optimizer(model_class, init_params):
         raise Exception("unknown optimizer: ", FLAGS.optimizer)
 
     return optimizer
-
-@jax.jit
-def loss_laaf(field_fn):
-    penalty = 0
-    k = 1
-    for name, val in field_fn.params.items():
-        if name == '0':
-            for name2, val2 in val.items():
-                if 'laaf' in name2:
-                    penalty += np.exp(
-                        np.power(np.squeeze(val2['omega']), k)
-                    )
-                    k += 1
-        elif 'laaf' in name:
-            penalty += np.exp(
-                np.power(np.squeeze(val['omega']), k)
-            )
-            k += 1
-
-    return (k - 1) * (1 / penalty)
-
-
-@jax.jit
-def loss_nlaaf(field_fn):
-    penalty = 0
-    k = 1
-    for name, val in field_fn.params.items():
-        if name == '0':
-            for name2, val2 in val.items():
-                if 'nlaaf' in name2:
-                    n_activations = val2['omega'].shape[0]
-                    penalty += np.exp(
-                        np.sum(np.power(np.squeeze(val2['omega']), k)) / n_activations
-                    )
-                    k += 1
-        elif 'nlaaf' in name:
-            n_activations = val['omega'].shape[0]
-            penalty += np.exp(
-                np.sum(np.power(np.squeeze(val['omega']), k)) / n_activations
-            )
-            k += 1
-
-    return (k - 1) * (1 / penalty)

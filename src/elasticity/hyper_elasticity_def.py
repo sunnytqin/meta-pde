@@ -5,13 +5,12 @@ by importing any other pde_def"""
 
 from ..nets.field import make_nf_ndim, DivFreeVelocityPressureField, DivFreeVelocityPressureSeparateField
 
-from .hyper_elasticity_common import (
+from .hyper_elasticity_common_new import (
     sample_params,
     sample_points,
     loss_fn,
     plot_solution,
     sample_points_in_domain,
-    SecondOrderTaylorLookup,
 )
 
 from .hyper_elasticity_fenics import solve_fenics

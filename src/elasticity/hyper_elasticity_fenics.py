@@ -91,29 +91,24 @@ def solve_fenics(params, boundary_points=64, resolution=16):
     def top(x, on_boundary):
         return on_boundary and fa.near(x[1], FLAGS.ymax)
 
-    # Define Dirichlet boundary (y = 0)
-    c_bottom = fa.Constant(("0.0", "0.0"))
-    c_top = fa.Constant(("0.0", "-0.1"))
-
     V = fa.VectorFunctionSpace(mesh, "Lagrange", 1)
 
-    bc_bottom = fa.DirichletBC(V, c_bottom, bottom)
-    bc_top = fa.DirichletBC(V, c_top, top)
-    bcs = [bc_bottom, bc_top]
+    boundaries = fa.MeshFunction("size_t", mesh, mesh.topology().dim() - 1)
+    boundaries.set_all(0)
+    left = fa.AutoSubDomain(lambda x: fa.near(x[0], FLAGS.xmin))
+    left.mark(boundaries, 1)
+    right = fa.AutoSubDomain(lambda x: fa.near(x[0], FLAGS.xmax))
+    right.mark(boundaries, 2)
+    ds = fa.ds(subdomain_data=boundaries)
 
-    #boundaries = fa.MeshFunction("size_t", mesh, mesh.topology().dim() - 1)
-    #boundaries.set_all(0)
-    #left = fa.AutoSubDomain(lambda x: fa.near(x[0], FLAGS.xmin))
-    #left.mark(boundaries, 1)
-    #ds = fa.ds(subdomain_data=boundaries)
-
-    
     # Define functions
     du = fa.TrialFunction(V)  # incremental displacement
     v = fa.TestFunction(V)  # Test function
     u = fa.Function(V)  # Displacement from previous iteration
-    B = fa.Constant((0.0, -0.5))  # Body force per unit volume
-    T = fa.Constant((0.0, 0.0))  # Traction force on the boundary
+    body_force = 0.0
+    traction_force = 0.0
+    B = fa.Constant((0.0, body_force))  # Body force per unit volume
+    T = fa.Constant((traction_force, 0.0))  # Traction force on the boundary
 
     # Kinematics
     d = u.geometric_dimension()
@@ -136,11 +131,28 @@ def solve_fenics(params, boundary_points=64, resolution=16):
     #E, nu = 10.0, 0.3
     #mu, lmbda = fa.Constant(E / (2 * (1 + nu))), fa.Constant(E * nu / ((1 + nu) * (1 - 2 * nu)))
 
+    reuse = False
+    if reuse:
+        # generate cache data
+        cache = {
+            "hparams": (resolution,
+                        FLAGS.xmin, FLAGS.xmax,
+                        FLAGS.ymin, FLAGS.ymax,
+                        poisson_ratio, top_disp,
+                        body_force),
+            "params": params,
+            "pde": "hyper_elasticity",
+        }
+
+        solved = read_fenics_solution(cache, u)
+        if solved:
+            return u
+
     # Stored strain energy density (compressible neo-Hookean model)
     psi = (shear_mod / 2) * (Jinv * Ic - d) + (bulk_mod / 2) * (J - 1) ** 2
 
     # Total potential energy
-    Pi = psi * fa.dx - fa.dot(B, u) * fa.dx - fa.dot(T, u) * fa.ds #ds(1)
+    Pi = psi * fa.dx #- fa.dot(B, u) * fa.dx - fa.dot(T, u) * ds(1) - fa.dot(T, u) * ds(2)#fa.ds
 
     # Compute first variation of Pi (directional derivative about u in the direction of v)
     F = fa.derivative(Pi, u, v)
@@ -156,11 +168,11 @@ def solve_fenics(params, boundary_points=64, resolution=16):
                    "precompute_ip_const": True}
 
     newton_args = {
-        "maximum_iterations": 20_000,
+        "maximum_iterations": 2_000,
         "linear_solver": "petsc",
         "relaxation_parameter": 0.01,
-        "relative_tolerance": 5e-3,
-        "absolute_tolerance": 5e-3
+        "relative_tolerance": 1.e-2,
+        "absolute_tolerance": 1.e-2
         }
     snes_args = {
         "method": "qn",
@@ -173,18 +185,33 @@ def solve_fenics(params, boundary_points=64, resolution=16):
         "snes_solver": snes_args,
     }
 
-    try:
-        # Solve variational problem
-        fa.solve(F == 0, u, bcs, J=J,
-                 form_compiler_parameters=ffc_options,
-                 solver_parameters=solver_args)
-    except Exception as e:
-        print("Failed solve: ", e)
-        print("Failed on params: ", params)
-        solver_args['newton_solver']['relaxation_parameter'] *= 0.2
-        fa.solve(F == 0, u, bcs, J=J,
-                 form_compiler_parameters=ffc_options,
-                 solver_parameters=solver_args)
+    initial_guess = np.random.randn(len(u.vector())) * 1e-6
+    for step in [4]: #range(5):
+        # Define Dirichlet boundary (y = 0)
+        top_disp = 0.0 - step * 0.03
+        c_bottom = fa.Constant(("0.0", "0.0"))
+        c_top = fa.Constant(("0.0", str(top_disp)))
+
+        bc_bottom = fa.DirichletBC(V, c_bottom, bottom)
+        bc_top = fa.DirichletBC(V, c_top, top)
+        bcs = [bc_bottom, bc_top]
+
+        u.vector().set_local(initial_guess)
+
+        try:
+            # Solve variational problem
+            fa.solve(F == 0, u, bcs, J=J,
+                     form_compiler_parameters=ffc_options,
+                     solver_parameters=solver_args)
+        except Exception as e:
+            print("Failed solve: ", e)
+            print("Failed on params: ", params)
+            solver_args['newton_solver']['relaxation_parameter'] *= 0.01
+            fa.solve(F == 0, u, bcs, J=J,
+                     form_compiler_parameters=ffc_options,
+                     solver_parameters=solver_args)
+
+        initial_guess = u.vector()
 
     #if not solved:
     #    path = save_fenics_solution(cache, u)
@@ -211,7 +238,9 @@ def main(argv):
 
     print("params: ", params)
 
-    u = solve_fenics(params=params, resolution=32)
+    u = solve_fenics(params=params, resolution=FLAGS.ground_truth_resolution,
+                     #boundary_points=30)
+                     boundary_points=int(FLAGS.boundary_resolution_factor * FLAGS.ground_truth_resolution))
 
     x = np.array(u.function_space().tabulate_dof_coordinates()[:100])
 

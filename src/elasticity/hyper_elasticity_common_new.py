@@ -36,7 +36,6 @@ if __name__ == "__main__":
 
 
 def deformation_gradient(x, field_fn):
-    #assert len(x.shape) == 1
     jac = jax.jacfwd(lambda x: field_fn(x).squeeze())(x)
     F = (np.identity(2) + jac)
     return F
@@ -64,28 +63,13 @@ def loss_domain_fn(field_fn, points_in_domain, params):
         Ic = np.trace(right_cauchygreen(x, field_fn))
         energy = (shear_mod / 2) * (Jinv * Ic - d) + (bulk_mod / 2) * (J - 1) ** 2
 
-        # body force
-        #u = field_fn(x)
-        #b = np.array([0.0, 0.0])
-        #body_force = np.dot(u, b)
-        return energy #- body_force
+        return energy
 
     vmap_integrand = jax.vmap(integrand, in_axes=(0, None))
     err = vmap_integrand(points_in_domain, field_fn)
 
     return err
 
-
-#@partial(jax.jit, static_argnums=(0,))
-#def loss_top_fn(field_fn, points_on_top, params):
-#    source_params, bc_params, per_hole_params, n_holes = params
-#    #g_x = bc_params[0]
-#    #g_y = bc_params[1]
-#    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_top)
-#    normal = np.array([0., 1.])
-#    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
-#    err = err**2
-#    return err
 
 def loss_top_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
@@ -97,84 +81,12 @@ def loss_bottom_fn(field_fn, points_on_bottom, params):
     return field_fn(points_on_bottom)** 2
 
 
-#def loss_left_fn(field_fn, points_on_left, params):
-#    source_params, bc_params, per_hole_params, n_holes = params
-#    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_left)
-#    normal = np.array([-1., 0.])
-#    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
-#    err = err ** 2
-#    return err
-
 @partial(jax.jit, static_argnums=(0,))
 def loss_left_fn(field_fn, points_on_top, params):
     source_params, bc_params, per_hole_params, n_holes = params
     T = np.array([0.2, 0.])
     err = jax.vmap(lambda x: np.dot(T, field_fn(x)))(points_on_top)
     return -err
-
-
-def loss_right_fn(field_fn, points_on_right, params):
-    source_params, bc_params, per_hole_params, n_holes = params
-    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_right)
-    normal = np.array([1., 0.])
-    err = jax.vmap(lambda x: np.matmul(x, normal) - np.array([0, 0]))(sigma)
-    err = err ** 2
-    return err
-
-
-def loss_in_hole_fn(field_fn, points_on_holes, params):
-    source_params, bc_params, per_hole_params, n_holes = params
-    c, xy, size = per_hole_params
-
-    def parametrized_x(theta):
-        r0 = size * (1.0 + c[0] * np.cos(4 * theta) + c[1] * np.cos(8 * theta))
-        x = xy[0] + r0 * np.cos(theta)
-        return x.squeeze()
-
-    def parametrized_y(theta):
-        r0 = size * (1.0 + c[0] * np.cos(4 * theta) + c[1] * np.cos(8 * theta))
-        y = xy[1] + r0 * np.sin(theta)
-        return y.squeeze()
-
-    def find_normal_vec(theta):
-        norm_x_fn = jax.grad(parametrized_x)
-        norm_y_fn = jax.grad(parametrized_y)
-
-        dx_dtheta = norm_x_fn(theta)
-        dy_dtheta = norm_y_fn(theta)
-
-        slope = dy_dtheta / dx_dtheta
-        norm_slope = -1. / slope
-
-        u = 1
-        v = norm_slope
-        n = np.linalg.norm([u, v])
-        u /= n
-        v /= n
-
-        return u, v
-
-    vmap_find_normal_vec = jax.vmap(find_normal_vec)
-
-    cos_thetas = points_on_holes[:, 0] - xy[0]
-    sin_thetas = points_on_holes[:, 1] - xy[1]
-    tan_thetas = sin_thetas / cos_thetas
-    thetas = np.arctan(tan_thetas)
-
-    thetas = (jax.vmap(lambda cos_theta, theta:
-                     jax.lax.cond(
-                         cos_theta > 0, lambda x: x, lambda x: x - np.pi * np.sign(x), theta
-                     )
-                     )(cos_thetas, thetas)).flatten()
-
-    u, v = vmap_find_normal_vec(thetas)
-    normal = np.stack((u, v)).transpose()
-
-    sigma = jax.vmap(lambda x: sigma_fn(x, field_fn))(points_on_holes)
-
-    err = jax.vmap(lambda x, y: np.matmul(x, y) - np.array([0, 0]), in_axes=(0, 0))(sigma, normal)
-    err = err ** 2
-    return err
 
 
 def loss_fn(field_fn, points, params):
@@ -186,11 +98,6 @@ def loss_fn(field_fn, points, params):
         points_on_holes,
         points_in_domain,
     ) = points
-    #points_in_domain = np.concatenate([points_in_domain,
-    #                                   points_on_holes,
-    #                                   points_on_left,
-    #                                   points_on_right
-    #                                   ])
     return (
         {
             "loss_bottom": 1000. * np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
@@ -198,7 +105,6 @@ def loss_fn(field_fn, points, params):
         },
         {
             "loss_domain": np.mean(loss_domain_fn(field_fn, points_in_domain, params)),
-            #"loss_left": np.sum(loss_left_fn(field_fn, points_on_left, params)),
         },
     )
 
@@ -363,8 +269,8 @@ def sample_points_top(key, n, params):
     k1, k2 = jax.random.split(key)
 
     n_tmp = 10 * n
-    top_x = np.linspace(FLAGS.xmin, FLAGS.xmax, n_tmp, endpoint=False) + jax.random.uniform(
-        key, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n_tmp, shape=(1,)
+    top_x = jax.random.uniform(
+        key, minval=FLAGS.xmin, maxval=FLAGS.xmax, shape=(n_tmp,)
     )
     xy = np.stack([top_x, FLAGS.ymax * np.ones(n_tmp)], axis=1)
 
@@ -378,8 +284,8 @@ def sample_points_bottom(key, n, params):
     k1, k2 = jax.random.split(key)
 
     n_tmp = 10 * n
-    bottom_x = np.linspace(FLAGS.xmin, FLAGS.xmax, n_tmp, endpoint=False) + jax.random.uniform(
-            key, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n_tmp, shape=(1,)
+    bottom_x = jax.random.uniform(
+        key, minval=FLAGS.xmin, maxval=FLAGS.xmax, shape=(n_tmp,)
     )
     xy = np.stack([bottom_x, FLAGS.ymin * np.ones(n_tmp)], axis=1)
 
@@ -393,8 +299,8 @@ def sample_points_left(key, n, params):
     k1, k2 = jax.random.split(key)
 
     n_tmp = 10 * n
-    left_y = np.linspace(FLAGS.ymin, FLAGS.ymax, n_tmp, endpoint=False) + jax.random.uniform(
-        k1, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / n_tmp, shape=(1,)
+    left_y = jax.random.uniform(
+        key, minval=FLAGS.ymin, maxval=FLAGS.ymax, shape=(n_tmp,)
     )
     xy = np.stack([FLAGS.xmin * np.ones(n_tmp), left_y], axis=1)
 
@@ -408,8 +314,8 @@ def sample_points_right(key, n,  params):
     k1, k2 = jax.random.split(key)
 
     n_tmp = 10 * n
-    right_y = np.linspace(FLAGS.ymin, FLAGS.ymax, n_tmp, endpoint=False) + jax.random.uniform(
-        k2, minval=0.0, maxval=(FLAGS.ymax - FLAGS.ymin) / n_tmp, shape=(1,)
+    right_y = jax.random.uniform(
+        key, minval=FLAGS.ymin, maxval=FLAGS.ymax, shape=(n_tmp,)
     )
     xy = np.stack([FLAGS.xmax * np.ones(n_tmp), right_y], axis=1)
 
@@ -433,7 +339,6 @@ def sample_points_on_pores(key, n, params):
         c = per_hole_param[0: 2]
         xy = per_hole_param[2: 4]
         size = per_hole_param[4]
-        #c, xy, size = per_hole_param
 
         thetas = jax.random.uniform(
             key, minval=0.0, maxval=1.0, shape=(n_tmp,)
@@ -457,25 +362,16 @@ def sample_points_on_pores(key, n, params):
 @partial(jax.jit, static_argnums=(1,))
 def sample_points_in_domain(key, n, params):
     _, _, per_hole_params, n_holes = params
-    k1, k2 = jax.random.split(key)
-    ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
+    k1, k2, k3 = jax.random.split(key, 3)
     # total number of points is 2 * n
     # so as long as the fraction of volume covered is << 1/2 we are ok
-    n_x = npo.int32(npo.sqrt(3) * npo.sqrt(n) * npo.sqrt(ratio))
-    n_y = npo.int32(npo.sqrt(3) * npo.sqrt(n) / npo.sqrt(ratio))
-    dx = (FLAGS.xmax - FLAGS.xmin) / n_x
-    dy = (FLAGS.ymax - FLAGS.ymin) / n_y
+    n_x = 3 * n
+    n_y = 3 * n
 
-    xs = np.linspace(FLAGS.xmin, FLAGS.xmax, n_x, endpoint=False)
-    ys = np.linspace(FLAGS.ymin, FLAGS.ymax, n_y, endpoint=False)
+    xs = jax.random.uniform(k1, minval=FLAGS.xmin, maxval=FLAGS.xmax, shape=(n_x, ))
+    ys = jax.random.uniform(k2, minval=FLAGS.ymin, maxval=FLAGS.ymax, shape=(n_y, ))
 
-    xv, yv = np.meshgrid(xs, ys)
-
-    xy = np.stack((xv.flatten(), yv.flatten()), axis=1)
-
-    xy = xy + jax.random.uniform(
-        k1, minval=0.0, maxval=np.array([[dx, dy]]), shape=(len(xy), 2)
-    )
+    xy = np.stack((xs.flatten(), ys.flatten()), axis=1)
 
     in_hole = jax.vmap(
         jax.vmap(is_in_hole, in_axes=(0, None)), in_axes=(None, 0), out_axes=1
@@ -485,9 +381,8 @@ def sample_points_in_domain(key, n, params):
     mask = mask < n_holes
     in_hole = in_hole * mask
     in_hole = np.any(in_hole, axis=1)
-    #in_hole = np.squeeze(jax.vmap(is_in_hole, in_axes=(0, None))(xy, per_hole_params))
 
-    idxs = jax.random.choice(k2, xy.shape[0], replace=False, p=1 - in_hole, shape=(n,))
+    idxs = jax.random.choice(k3, xy.shape[0], replace=False, p=1 - in_hole, shape=(n,))
     return xy[idxs]
 
 
@@ -497,47 +392,6 @@ def is_defined(xy, u):
         return True
     except Exception as e:
         return False
-
-
-class SecondOrderTaylorLookup(object):
-    def __init__(self, u, x0, d=3):
-        x0 = np.array(x0)
-        Vg = fa.TensorFunctionSpace(u.function_space().mesh(), "P", 2, shape=(d, 2))
-        ug = fa.project(fa.grad(u), Vg, solver_type="mumps")
-        ug.set_allow_extrapolation(True)
-        Vh = fa.TensorFunctionSpace(u.function_space().mesh(), "P", 2, shape=(d, 2, 2))
-        uh = fa.project(fa.grad(ug), Vh, solver_type="mumps")
-        uh.set_allow_extrapolation(True)
-
-        u.set_allow_extrapolation(True)
-        self.x0s = x0.reshape(len(x0), 2)
-        self.u0s = np.array([u(npo.array(xi)) for xi in x0])
-        self.g0s = np.array([ug(npo.array(xi)) for xi in x0])
-        self.h0s = np.array([uh(npo.array(xi)) for xi in x0])
-        u.set_allow_extrapolation(False)
-
-    def __call__(self, x):
-        x = x.reshape(-1, 2)
-        dists = np.sum((self.x0s.reshape(1, -1, 2) - x.reshape(-1, 1, 2)) ** 2, axis=2)
-        _, inds = jax.lax.top_k(-dists, 1)
-        x0 = self.x0s[inds]
-        u0 = self.u0s[inds]
-        g0 = self.g0s[inds]
-        h0 = self.h0s[inds]
-        return jax.vmap(single_second_order_taylor_eval)(x, x0, u0, g0, h0).squeeze()
-
-
-@jax.jit
-def single_second_order_taylor_eval(xi, x0i, u0, g0, h0, d=3):
-    dx = xi - x0i
-    return (
-        u0.reshape(d)
-        + np.matmul(g0.reshape(d, 2), dx.reshape(2, 1)).reshape(d)
-        + np.matmul(
-            dx.reshape(1, 1, 2), np.matmul(h0.reshape(d, 2, 2), dx.reshape(1, 2, 1))
-        ).reshape(d)
-        / 2.0
-    )
 
 
 def error_on_coords(fenics_fn, jax_fn, coords=None):
@@ -553,9 +407,6 @@ def plot_solution(u, params=None):
         u,
         mode="displacement",
     )
-    #cb = plt.colorbar(c, shrink=.8)
-    #cb.set_label('Displacement', size=6, c='b')
-    #cb.ax.tick_params(labelsize=6, color='blue')
 
 
 def main(argv):

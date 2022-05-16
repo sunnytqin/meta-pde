@@ -44,6 +44,7 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("bsize", 1, "batch size (in tasks)")
 flags.DEFINE_float("outer_lr", 1e-5, "outer learning rate")
+flags.DEFINE_float("inner_grad_clip", 100., "inner grad clipping")
 
 
 def main(argv):
@@ -63,9 +64,11 @@ def main(argv):
     def loss_fn(field_fn, points, params):
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
 
-        loss = FLAGS.bc_weight * np.sum(
-            np.array([bl for bl in boundary_losses.values()])
-        ) + np.sum(np.array([dl for dl in domain_losses.values()]))
+        loss = (
+            FLAGS.bc_weight *
+            np.sum(np.array([bl for bl in boundary_losses.values()])) +
+            np.sum(np.array([dl for dl in domain_losses.values()]))
+        )
 
         return loss, {**boundary_losses, **domain_losses}
 
@@ -75,6 +78,20 @@ def main(argv):
         params = pde.sample_params(k1)
         points = pde.sample_points(k2, FLAGS.outer_points, params)
         return loss_fn(model, points, params)
+
+    def make_task_loss_fns(key):
+        # The input key is terminal
+        params = pde.sample_params(key)
+
+        def inner_loss(key, field_fn, params=params):
+            inner_points = pde.sample_points(key, FLAGS.inner_points, params)
+            return loss_fn(field_fn, inner_points, params)
+
+        def outer_loss(key, field_fn, params=params):
+            outer_points = pde.sample_points(key, FLAGS.outer_points, params)
+            return loss_fn(field_fn, outer_points, params)
+
+        return inner_loss, outer_loss
 
     @jax.jit
     def get_grad_norms(key, model):
@@ -138,6 +155,10 @@ def main(argv):
                 batch_loss_fn, argnums=1, has_aux=True
             )(key, optimizer.target)
 
+        #batch_grad = jax.tree_util.tree_multimap(
+        #    lambda x, y: x * y, last_lr, batch_grad
+        #)
+
         grad_norm = np.sqrt(
             jax.tree_util.tree_reduce(
                 lambda x, y: x + y,
@@ -165,6 +186,72 @@ def main(argv):
     def validation_losses(model):
         return task_loss_fn(jax.random.PRNGKey(0), model)[0]
 
+    @jax.jit
+    def maml_step(key, optimizer):
+        # MAML specifics: Per param per step lrs
+        make_inner_opt = flax.optim.Momentum(learning_rate=1.0e-4, beta=0.0).create
+        # make_inner_opt = flax.optim.Adam(learning_rate=FLAGS.inner_lr, beta1=0.9, beta2=0.99).create
+
+        maml_def = maml.MamlDef(
+            make_inner_opt=make_inner_opt,
+            make_task_loss_fns=make_task_loss_fns,
+            inner_steps=5,
+            n_batch_tasks=1,
+            softplus_lrs=True,
+            outer_loss_decay=0.1,
+        )
+
+        k1, k2 = jax.random.split(key)
+
+        inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(0.5, b1=0.9, b2=0.99,)
+
+        if FLAGS.load_model_from_expt is not None:
+            value_flat, _ = jax.tree_util.tree_flatten(optimizer_target[1]['params'])
+            lr_init_params = jax.tree_util.tree_unflatten(jax.tree_util.tree_structure(optimizer.target), value_flat)
+        else:
+            lr_init_params = jax.tree_map(
+                lambda x: np.stack([np.ones_like(x) for _ in range(5)]),
+                optimizer.target,
+            )
+        inner_lr_state = inner_lr_init(lr_init_params)
+
+        inner_lrs = inner_lr_get(inner_lr_state)
+
+        with Timer() as t:
+            final_model, (meta_loss_sum, losses) = maml.single_task_rollout(
+                maml_def=maml_def,
+                rollout_key=k1,
+                initial_model=optimizer.target,
+                inner_loss_fn=task_loss_fn,
+                inner_lrs=inner_lrs,
+            )  
+        
+        log(
+                "step: {}, loss: {}, val_loss: {}, val_mse: {}, "
+                "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
+                "per_dim_rel_err: {}, deployment_time: {}, grad_norm: {}, "
+                "per_time_step_error: {} ,per train step time: {}".format(
+                    -1,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    t.interval,
+                )
+            )
+
+        optimizer = trainer_util.get_optimizer(Field, final_model.params)
+        #optimizer, loss, loss_aux, grad_norm = train_step(k2, optimizer)
+
+        return optimizer
+
+
     # ----- initialize model  ----
     Field = pde.BaseField.partial(
         sizes=[FLAGS.layer_size for _ in range(FLAGS.num_layers)],
@@ -173,8 +260,6 @@ def main(argv):
         omega=FLAGS.siren_omega,
         omega0=FLAGS.siren_omega0,
         log_scale=FLAGS.log_scale,
-        #use_laaf=FLAGS.laaf,
-        #use_nlaaf=FLAGS.nlaaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
@@ -196,11 +281,12 @@ def main(argv):
         with open(os.path.join(model_path, model_file), 'rb') as f:
             optimizer_target = pickle.load(f)
 
-        init_params = flax.serialization.from_state_dict(init_params, optimizer_target['params'])
+        init_params = flax.serialization.from_state_dict(init_params, optimizer_target[0]['params'])
 
-        optimizer = trainer_util.get_optimizer(Field, init_params)
+    optimizer_dummy = trainer_util.get_optimizer(Field, init_params)
 
     log('NN model:', jax.tree_map(lambda x: x.shape, init_params))
+
 
     # ----- sample param and get fenics ground truth -----
     key, gt_key, gt_points_key = jax.random.split(key, 3)
@@ -221,10 +307,9 @@ def main(argv):
 
     # ----- train NN -----
     time_last_log = time.time()
-    try:
-        print(optimizer.target.params['Dense_0'])
-    except:
-        print(optimizer.target.params['0']['Dense_0'])
+    key, subkey = jax.random.split(key)
+    optimizer = maml_step(subkey, optimizer_dummy)
+
 
     for step in range(FLAGS.outer_steps + 1):
         key, subkey = jax.random.split(key)

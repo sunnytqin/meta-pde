@@ -23,6 +23,7 @@ from absl import app
 from absl import flags
 from ..util import common_flags
 
+loss_fn_lib = importlib.import_module(f'.burgers_formulation.{FLAGS.burgers_pde}', package='src.burgers')
 
 FLAGS = flags.FLAGS
 flags.DEFINE_float("tmin", 0.0, "PDE initial time")
@@ -32,13 +33,10 @@ flags.DEFINE_integer("num_tsteps", 6, "number of time steps for td_burgers")
 flags.DEFINE_boolean("sample_time_random", True, "random time sample for NN")
 flags.DEFINE_float("max_reynolds", 500, "Reynolds number scale")
 flags.DEFINE_float("time_scale_deviation", 0.1, "Used to time scale loss")
-flags.DEFINE_boolean("td_burger_impose_symmetry", True, "for bc param sampling")
+flags.DEFINE_boolean("td_burger_impose_symmetry", False, "for bc param sampling")
 flags.DEFINE_integer("propagatetime_max", 20_000, "maximum iterations before propagate time step")
 flags.DEFINE_float("propagatetime_rel", 0.05, "rel val improvment change before propagate time step")
-FLAGS.bc_weight = 1.0
-FLAGS.max_holes = 0
-FLAGS.measure_grad_norm_every = int(2e3)
-FLAGS.outer_steps = int(1e8)
+flags.DEFINE_string("burgers_pde", "default", "define which burgers equation to solve")
 
 class GroundTruth:
     def __init__(self, fenics_functions_list, timesteps_list):
@@ -95,11 +93,6 @@ def loss_domain_fn(field_fn, points_in_domain, params):
     return (jax.vmap(lhs_fn)(points_in_domain) - jax.vmap(rhs_fn)(points_in_domain))**2
 
 
-loss_fn_lib = importlib.import_module('.burgers_formulation.default', package='src.burgers')
-loss_initial_fn = loss_fn_lib.loss_initial_fn
-loss_vertical_fn = loss_fn_lib.loss_vertical_fn
-loss_horizontal_fn = loss_fn_lib.loss_horizontal_fn
-
 def loss_time_scale(field_fn, points_in_domain, params):
 
     def taylor_val(x):
@@ -137,18 +130,24 @@ def loss_time_scale(field_fn, points_in_domain, params):
 def loss_fn(field_fn, points, params):
     (
         points_on_vertical,
-        points_on_horizontal,
+        points_on_bottom,
+        points_on_top,
         points_initial,
         points_on_holes,
         points_in_domain,
     ) = points
     #points_noslip = np.concatenate([points_on_walls, points_on_holes])
+    loss_initial_fn = loss_fn_lib.loss_initial_fn
+    loss_vertical_fn = loss_fn_lib.loss_vertical_fn
+    loss_bottom_fn = loss_fn_lib.loss_bottom_fn
+    loss_top_fn = loss_fn_lib.loss_top_fn
 
     return (
         {
             "loss_initial": np.mean(loss_initial_fn(field_fn, points_initial, params)),
             "loss_vertical": np.mean(loss_vertical_fn(field_fn, points_on_vertical, params)),
-            "loss_horizontal": np.mean(loss_horizontal_fn(field_fn, points_on_horizontal, params)),
+            "loss_bottom": np.mean(loss_bottom_fn(field_fn, points_on_bottom, params)),
+            "loss_top": np.mean(loss_top_fn(field_fn, points_on_top, params)),
             #"loss_time_scale": np.mean(loss_time_scale(field_fn, points_in_domain, params)),
         },
         {
@@ -177,26 +176,26 @@ def sample_params(key):
     k6 = k6 * FLAGS.vary_geometry
     k7 = k7 * FLAGS.vary_geometry
 
-    source_params = FLAGS.max_reynolds * jax.random.uniform(k1, shape=(1,), minval=0., maxval=1.)
+    source_params = FLAGS.max_reynolds * jax.random.uniform(k1, shape=(1,), minval=0.8, maxval=1.)
 
     if FLAGS.td_burger_impose_symmetry:
 
         bc_params_magnitude = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=1.0, maxval=3.0, shape=(1, 1,)
+            k2, minval=0.8, maxval=1.5, shape=(1, 1,)
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 1, )) - 1.)
 
+
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-             k2, minval=1.0, maxval=1.5, shape=(1, 1,)
+             k2, minval=0.8, maxval=1.5, shape=(1, 1,)
         )
 
         bc_params = np.concatenate([bc_params_magnitude, bc_params_magnitude, bc_params_scale], axis=1)
     else:
         bc_params_magnitude = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=1.0, maxval=3.0, shape=(1, 2,)
+            k2, minval=0.8, maxval=1.5, shape=(1, 2,)
         ) #* (2. * jax.random.bernoulli(k5, shape=(1, 2, )) - 1.)
-
         bc_params_scale = FLAGS.bc_scale * jax.random.uniform(
-            k2, minval=1.0, maxval=1.5, shape=(1, 1,)
+            k2, minval=0.8, maxval=1.5, shape=(1, 1,)
         )
         bc_params = np.concatenate([bc_params_magnitude, bc_params_scale], axis=1)
 
@@ -274,9 +273,10 @@ def sample_points(key, n, params):
     n_on_walls = n
     n_on_holes = n // 2 #- n_on_walls #- n_on_inlet - n_on_outlet
     points_on_vertical = sample_points_on_vertical(k1, n_on_walls, params)
-    points_on_horizontal = sample_points_on_horizontal(k2, n_on_walls, params)
+    points_on_bottom = sample_points_on_bottom(k2, n_on_walls, params)
+    points_on_top = sample_points_on_top(k2, n_on_walls, params)
     points_initial = sample_points_initial(k3, n_on_walls, params)
-    points_in_domain = sample_points_in_domain(k5, n, params)
+    points_in_domain = sample_points_in_domain(k5, n, params, None)
     if FLAGS.max_holes > 0:
         points_on_holes = sample_points_on_pores(k4, n_on_holes, params)
     else:
@@ -284,7 +284,8 @@ def sample_points(key, n, params):
 
     return (
         points_on_vertical,
-        points_on_horizontal,
+        points_on_bottom,
+        points_on_top,
         points_initial,
         points_on_holes,
         points_in_domain,
@@ -310,8 +311,41 @@ def sample_points_on_vertical(key, n, params):
     return np.concatenate((lhs_xy_t, rhs_xy_t))
 
 
-def sample_points_on_horizontal(key, n, params):
-    return sample_points_on_vertical(key, n, params)[:, [1, 0, 2]]
+#def sample_points_on_horizontal(key, n, params):
+#    return sample_points_on_vertical(key, n, params)[:, [1, 0, 2]]
+
+@partial(jax.jit, static_argnums=(1,))
+def sample_points_on_bottom(key, n, params):
+    k1, k2 = jax.random.split(key)
+    n_scaled = n // (FLAGS.num_tsteps - 1)
+    n_scaled = n_scaled // 2
+    _, _, per_hole_params, n_holes = params
+    x = (np.linspace(FLAGS.xmin, FLAGS.xmax, n_scaled, endpoint=False) + jax.random.uniform(
+        k1, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n_scaled, shape=(1,)
+    )).reshape(n_scaled, 1)
+    t = sample_time(k2, n_scaled)
+    x = np.tile(x, (FLAGS.num_tsteps - 1, 1))
+    y = (FLAGS.ymin * np.ones(len(t))).reshape(-1, 1)
+    xy_t = np.concatenate([x, y, t], axis=1)
+
+    return xy_t
+
+
+@partial(jax.jit, static_argnums=(1,))
+def sample_points_on_top(key, n, params):
+    k1, k2 = jax.random.split(key)
+    n_scaled = n // (FLAGS.num_tsteps - 1)
+    n_scaled = n_scaled // 2
+    _, _, per_hole_params, n_holes = params
+    x = (np.linspace(FLAGS.xmin, FLAGS.xmax, n_scaled, endpoint=False) + jax.random.uniform(
+        k1, minval=0.0, maxval=(FLAGS.xmax - FLAGS.xmin) / n_scaled, shape=(1,)
+    )).reshape(n_scaled, 1)
+    t = sample_time(k2, n_scaled)
+    x = np.tile(x, (FLAGS.num_tsteps - 1, 1))
+    y = (FLAGS.ymax * np.ones(len(t))).reshape(-1, 1)
+    xy_t = np.concatenate([x, y, t], axis=1)
+
+    return xy_t
 
 
 # not used and thus no changed has been made
@@ -405,13 +439,17 @@ def sample_points_on_pores(key, n, params):
 
     return xy_t
 
-@partial(jax.jit, static_argnums=(1,))
-def sample_points_in_domain(key, n, params):
+
+@partial(jax.jit, static_argnums=(1, 3))
+def sample_points_in_domain(key, n, params, num_tsteps=None):
     _, _, per_hole_params, n_holes = params
     k1, k2, k3 = jax.random.split(key, 3)
     ratio = (FLAGS.xmax - FLAGS.xmin) / (FLAGS.ymax - FLAGS.ymin)
     # rescale n according to time steps
-    n_scaled = n // (FLAGS.num_tsteps - 1)
+    if num_tsteps is None:
+        n_scaled = n // (FLAGS.num_tsteps - 1)
+    else:
+        n_scaled = n // (num_tsteps - 1)
     # total number of points is 2 * n
     # so as long as the fraction of volume covered is << 1/2 we are ok
     n_x = npo.int32(npo.sqrt(1.1) * npo.sqrt(n_scaled) * npo.sqrt(ratio))
@@ -452,9 +490,10 @@ def sample_points_in_domain(key, n, params):
 
     return xy_t
 
+
 # new
 def sample_points_initial(key, n, params):
-    points_in_domain = sample_points_in_domain(key, n * (FLAGS.num_tsteps - 1), params)[0: n, :]
+    points_in_domain = sample_points_in_domain(key, n * (FLAGS.num_tsteps - 1), params, None)[0: n, :]
     t = np.zeros((points_in_domain.shape[0], 1))
     return np.concatenate([points_in_domain[:, :-1], t], axis=1)
 
@@ -465,15 +504,17 @@ def sample_time(key, n):
                         lambda _: FLAGS.tmax,
                         operand=None)
     if FLAGS.sample_time_random:
-        t = np.linspace(FLAGS.tmin, tmax, FLAGS.num_tsteps, endpoint=False)\
+        num_tsteps = FLAGS.num_tsteps - 1
+        t = np.linspace(FLAGS.tmin, tmax, num_tsteps, endpoint=False)\
             - jax.random.uniform(
-            key, minval=-(tmax - FLAGS.tmin) / n, maxval=0.0, shape=(1, )
+            key, minval=-(tmax - FLAGS.tmin) / num_tsteps, maxval=0.0, shape=(1, )
             )
 
-        t = np.repeat(t[:-1], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding last points
+        t = np.repeat(t, n).reshape(num_tsteps * n, 1)
     else:
-        t = np.linspace(FLAGS.tmin, tmax, FLAGS.num_tsteps, endpoint=False)
-        t = np.repeat(t[1:], n).reshape((FLAGS.num_tsteps - 1) * n, 1)  # excluding initial points
+        num_tsteps = FLAGS.num_tsteps - 1
+        t = np.linspace(FLAGS.tmin, tmax, num_tsteps, endpoint=False)
+        t = np.repeat(t[1:], n).reshape(num_tsteps * n, 1)  # excluding initial points
     return t
 
 
@@ -548,14 +589,21 @@ def plot_solution(u_list, params, t_val=None):
 
 def plot_solution_snapshot(u):
     intensity = fa.inner(u, u)
-    fa.plot(intensity,
-            mode="color",
-            shading="gouraud",
-            edgecolors="k",
-            linewidth=0.0,
-            cmap="BuPu",
-            )
-    fa.plot(u)
+    c = fa.plot(
+        intensity,
+        mode="color",
+        shading="gouraud",
+        edgecolors="k",
+        linewidth=0.0,
+        cmap="BuPu",
+    )
+    # plt.colorbar(c)
+    d = fa.plot(
+        u,
+    )
+    cb = plt.colorbar(d)
+    cb.set_label('Velocity', size=6, c='b')
+    cb.ax.tick_params(labelsize=6, color='blue')
 
 
 def main(argv):
@@ -570,7 +618,8 @@ def main(argv):
         points = sample_points(sk2, 512, params)
         (
             points_on_vertical,
-            points_on_horizontal,
+            points_on_bottom,
+            points_on_top,
             points_initial,
             points_on_holes,
             points_in_domain,
@@ -582,7 +631,10 @@ def main(argv):
             points_on_vertical[:, 0], points_on_vertical[:, 1], label="points on vertical walls"
         )
         plt.scatter(
-            points_on_horizontal[:, 0], points_on_horizontal[:, 1], label="points on horizontal walls"
+            points_on_bottom[:, 0], points_on_bottom[:, 1], label="points on bottom walls"
+        )
+        plt.scatter(
+            points_on_top[:, 0], points_on_top[:, 1], label="points on top walls"
         )
         plt.scatter(
             points_initial[:, 0], points_initial[:, 1], label="points initial"
@@ -606,7 +658,11 @@ def main(argv):
         plt.legend()
 
         plt.subplot(5, 1, 2)
-        plt.hist(points_on_horizontal[:, 2], bins=t_bins, label="points on horizontal walls")
+        plt.hist(points_on_bottom[:, 2], bins=t_bins, label="points on horizontal walls")
+        plt.legend()
+
+        plt.subplot(5, 1, 2)
+        plt.hist(points_on_top[:, 2], bins=t_bins, label="points on horizontal walls")
         plt.legend()
 
         plt.subplot(5, 1, 3)

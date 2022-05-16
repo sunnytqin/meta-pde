@@ -16,10 +16,6 @@ def get_pde(pde_name):
         FLAGS.domain_loss = "domain_loss"
         return poisson_def
 
-    #elif pde_name == "burgers":
-    #    FLAGS.domain_loss = "domain_loss"
-    #    return burgers_def
-
     elif pde_name == "td_burgers":
         FLAGS.domain_loss = ["loss_domain", "loss_initial"]
         return td_burgers_def

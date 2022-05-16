@@ -5,7 +5,7 @@ by importing any other pde_def"""
 
 from ..nets.field import NeuralPotential
 
-from .poisson_common import (
+from .poisson_common_new import (
     sample_params,
     sample_points,
     sample_points_in_domain,

@@ -1,6 +1,7 @@
 """Use MAML to amortize fitting a NN across a class of PDEs."""
 
 from jax.config import config
+#config.update('jax_disable_jit', True)
 
 import jax
 import jax.numpy as np
@@ -34,6 +35,7 @@ from collections import deque
 import pdb
 import sys
 import os
+import pickle
 import shutil
 from copy import deepcopy
 from collections import namedtuple
@@ -63,9 +65,6 @@ def main(arvg):
     if FLAGS.out_dir is None:
         FLAGS.out_dir = FLAGS.pde + "_maml_results"
 
-    if FLAGS.load_model_from_expt is not None:
-        FLAGS.out_dir = os.path.join(FLAGS.out_dir, 'rerun')
-
     pde = get_pde(FLAGS.pde)
 
     path, log, tflogger = trainer_util.prepare_logging(FLAGS.out_dir, FLAGS.expt_name)
@@ -79,32 +78,14 @@ def main(arvg):
 
     def loss_fn(field_fn, points, params):
         boundary_losses, domain_losses = pde.loss_fn(field_fn, points, params)
-
-        loss = FLAGS.bc_weight * np.sum(
-            np.array([bl for bl in boundary_losses.values()])
-        ) + np.sum(np.array([dl for dl in domain_losses.values()]))
-
-        if FLAGS.laaf:
-            assert not FLAGS.nlaaf
-            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_laaf(field_fn)
-            laaf_loss_dict = {'laaf_loss': laaf_loss}
-
-            # recompute loss
-            loss = loss + laaf_loss
-
-        elif FLAGS.nlaaf:
-            assert not FLAGS.laaf
-            laaf_loss = FLAGS.laaf_weight * trainer_util.loss_nlaaf(field_fn)
-            laaf_loss_dict = {'laaf_loss': laaf_loss}
-
-            # recompute loss
-            loss = loss + laaf_loss
+        loss = np.sum(
+                FLAGS.bc_weight * 
+                np.sum(np.array([bl for bl in boundary_losses.values()])) + 
+                np.sum(np.array([dl for dl in domain_losses.values()]))
+                )
 
         # return the total loss, and as aux a dict of individual losses
-        if FLAGS.laaf or FLAGS.nlaaf:
-            return loss, {**boundary_losses, **domain_losses, **laaf_loss_dict}
-        else:
-            return loss, {**boundary_losses, **domain_losses}
+        return loss, {**boundary_losses, **domain_losses}
 
     def make_task_loss_fns(key):
         # The input key is terminal
@@ -120,6 +101,7 @@ def main(arvg):
         return inner_loss, outer_loss
 
     make_inner_opt = flax.optim.Momentum(learning_rate=FLAGS.inner_lr, beta=0.0).create
+    #make_inner_opt = flax.optim.Adam(learning_rate=FLAGS.inner_lr, beta1=0.9, beta2=0.99).create
 
     maml_def = maml.MamlDef(
         make_inner_opt=make_inner_opt,
@@ -137,22 +119,17 @@ def main(arvg):
         omega=FLAGS.siren_omega,
         omega0=FLAGS.siren_omega0,
         log_scale=FLAGS.log_scale,
-        use_laaf=FLAGS.laaf,
-        use_nlaaf=FLAGS.nlaaf,
     )
 
     key, subkey = jax.random.split(jax.random.PRNGKey(0))
 
-    if FLAGS.pde == 'td_burgers':
-        _, init_params = Field.init_by_shape(subkey, [((1, 3), np.float32)])
-    else:
-        _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
+    # Model params
+    _, init_params = Field.init_by_shape(subkey, [((1, 2), np.float32)])
 
     if FLAGS.load_model_from_expt is not None:
-        model_dir = FLAGS.pde + "_maml_results"
-        model_path = os.path.join(model_dir, FLAGS.load_model_from_expt)
+        model_path = FLAGS.load_model_from_expt
         model_file = npo.array(
-            [f for f in os.listdir(model_path) if "maml_step" in f]
+            [f for f in os.listdir(model_path) if "model_step" in f]
         )
         steps = npo.zeros_like(model_file, dtype=int)
         for i, f in enumerate(model_file):
@@ -161,38 +138,28 @@ def main(arvg):
             np.argsort(steps)[-1]
         ]
         log('load pre-trained model from file: ', model_file)
-        with open(os.path.join(model_path, model_file), 'r') as f:
-            optimizer_target_prev = f.read()
-        init_params = flax.serialization.from_state_dict(init_params, optimizer_target_prev)
+        with open(os.path.join(model_path, model_file), 'rb') as f:
+            optimizer_target = pickle.load(f)
+
+        init_params = flax.serialization.from_state_dict(init_params, optimizer_target[0]['params'])
+
+    optimizer = trainer_util.get_optimizer(Field, init_params)
 
     log(
         'NN model:', jax.tree_map(lambda x: x.shape, init_params)
     )
 
-    #for k, v in init_params.items():
-    #    if type(v) is not dict:
-    #        print(f"-> {k}: {v.shape}")
-    #    else:
-    #        print(f"-> {k}")
-    #        for k2, v2 in v.items():
-    #            if type(v2) is not dict:
-    #                print(f"  -> {k2}: {v2.shape}")
-    #            else:
-    #                print(f"  -> {k2}")
-    #                for k3, v3 in v2.items():
-    #                    print(f"    -> {k3}: {v3.shape}")
-
-    optimizer = trainer_util.get_optimizer(Field, init_params)
-
-    inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(FLAGS.lr_inner_lr)
-
     # Per param per step lrs
-    inner_lr_state = inner_lr_init(
-        jax.tree_map(
-            lambda x: np.stack([np.ones_like(x) for _ in range(FLAGS.inner_steps)]),
-            optimizer.target,
-        )
+    inner_lr_init, inner_lr_update, inner_lr_get = optimizers.adam(FLAGS.lr_inner_lr, b1=0.9, b2=0.99,)
+    lr_init_params = jax.tree_map(
+        lambda x: np.stack([np.ones_like(x) for _ in range(FLAGS.inner_steps)]),
+        optimizer.target,
     )
+    if FLAGS.load_model_from_expt is not None:
+        _, value_tree = jax.tree_util.tree_flatten(lr_init_params)
+        value_flat, _ = jax.tree_util.tree_flatten(optimizer_target[1]['params'])
+        lr_init_params = jax.tree_util.tree_unflatten(value_tree, value_flat)
+    inner_lr_state = inner_lr_init(lr_init_params)
 
     # --------------------- Defining the evaluation functions --------------------
 
@@ -261,7 +228,6 @@ def main(arvg):
         inner_lr_state = inner_lr_update(step, meta_grad[1], inner_lr_state)
         return optimizer, inner_lr_state, losses, meta_losses, meta_grad_norm
 
-
     key, gt_key, gt_points_key = jax.random.split(key, 3)
 
     gt_keys = jax.random.split(gt_key, FLAGS.n_eval)
@@ -273,18 +239,7 @@ def main(arvg):
     )
 
     if FLAGS.pde == 'td_burgers':
-        FLAGS.tmax_nn = 1e-4
-        early_stopping_tracker = deque()
-        propagate_time = False
-        last_prop_step = 0
-
-        t_list = []
-        for i in range(FLAGS.num_tsteps):
-            tile_idx = coords.shape[1] // FLAGS.num_tsteps
-            t_idx = np.squeeze(np.arange(i * tile_idx, (i + 1) * tile_idx))
-            t_unique = np.unique(coords[:, t_idx, 2])
-            t_list.append(np.squeeze(t_unique))
-            assert len(t_unique) == 1
+        t_list = fenics_functions[0].timesteps_list
 
     time_last_log = time.time()
     # --------------------- Run MAML --------------------
@@ -307,9 +262,6 @@ def main(arvg):
 
         if np.isnan(np.mean(meta_losses[0])):
             log("encountered nan at at step {}".format(step))
-            # save final model
-            with open(os.path.join(path, "maml_step_final.txt".format(step)), "w") as f:
-                f.write(optimizer_target_prev)
             break
 
         if step % FLAGS.log_every == 0:
@@ -324,19 +276,6 @@ def main(arvg):
             val_losses, val_meta_losses = validation_losses(
                 (optimizer.target, inner_lrs)
             )
-
-            optimizer_target_prev = flax.serialization.to_state_dict(optimizer.target)
-
-            if FLAGS.pde == 'td_burgers' and len(early_stopping_tracker) == 3:
-                val_loss = np.mean(val_meta_losses[0])
-                improve_pct = (npo.mean(early_stopping_tracker) - val_loss) / npo.mean(early_stopping_tracker)
-                _ = early_stopping_tracker.popleft()
-                if (improve_pct < FLAGS.propagatetime_rel) and (step - last_prop_step) >= (FLAGS.propagatetime_max // 2):
-                    propagate_time = True
-                elif (step - last_prop_step) >= FLAGS.propagatetime_max:
-                    propagate_time = True
-            if FLAGS.pde == 'td_burgers':
-                early_stopping_tracker.append(val_loss)
 
             log(
                 "step: {}, meta_loss: {}, val_meta_loss: {}, val_mse: {}, "
@@ -370,7 +309,7 @@ def main(arvg):
             )
             log(
                 "per_step_losses: {}\nper_step_val_losses:{}\n".format(
-                    np.mean(losses[0], axis=0), np.mean(val_losses[0], axis=0),
+                    np.mean(losses, axis=0), np.mean(val_losses, axis=0),
                 )
             )
 
@@ -409,7 +348,7 @@ def main(arvg):
                         )
 
                     plt.figure()
-                    plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(losses[0], axis=0))
+                    plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(losses, axis=0))
                     plt.xlabel('Inner Step')
                     plt.ylabel('Loss')
                     tflogger.log_plots(
@@ -417,7 +356,7 @@ def main(arvg):
                     )
 
                     plt.figure()
-                    plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(val_losses[0], axis=0))
+                    plt.plot(np.arange(FLAGS.inner_steps + 1), np.mean(val_losses, axis=0))
                     plt.xlabel('Inner Step')
                     plt.ylabel('Val Loss')
                     tflogger.log_plots(
@@ -437,12 +376,12 @@ def main(arvg):
                         # )
                         tflogger.log_histogram(
                             "batch_loss_inner_step_{}".format(inner_step),
-                            losses[0][:, inner_step],
+                            losses[:, inner_step],
                             step,
                         )
                         tflogger.log_histogram(
                             "batch_val_loss_inner_step_{}".format(inner_step),
-                            val_losses[0][:, inner_step],
+                            val_losses[:, inner_step],
                             step,
                         )
                         # for k in losses[1]:
@@ -456,33 +395,19 @@ def main(arvg):
                         tflogger.log_histogram("Param: " + k, v.flatten(), step)
 
                     for inner_step in range(FLAGS.inner_steps):
-                        for k, v in jax_tools.dict_flatten(inner_lrs.params):
-                            tflogger.log_histogram(
-                                "inner_lr_{}: ".format(inner_step) + k,
-                                jax.nn.softplus(v[inner_step].flatten()),
-                                step,
-                            )
+                        try:
+                            for k, v in jax_tools.dict_flatten(inner_lrs.params):
+                                tflogger.log_histogram(
+                                    "inner_lr_{}: ".format(inner_step) + k,
+                                    jax.nn.softplus(v[inner_step].flatten()),
+                                    step,
+                                )
+                        except:
+                            print("inner lr", inner_lrs[inner_step])
         if FLAGS.viz_every > 0 and step % FLAGS.viz_every == 0:
-            plt.figure()
-            # pdb.set_trace()
-            trainer_util.compare_plots_with_ground_truth(
-                (optimizer.target, inner_lrs),
-                pde,
-                fenics_functions,
-                gt_params,
-                get_final_model,
-                maml_def,
-                FLAGS.inner_steps,
-            )
-
-            if FLAGS.expt_name is not None:
-                plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
-
-            if tflogger is not None:
-                tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
-
             if FLAGS.pde == 'td_burgers':
-                tmp_filenames = trainer_util.plot_model_time_series(
+                plt.figure()
+                trainer_util.plot_model_time_series_new(
                     (optimizer.target, inner_lrs),
                     pde,
                     fenics_functions,
@@ -491,34 +416,38 @@ def main(arvg):
                     maml_def,
                     FLAGS.inner_steps,
                 )
-                gif_out = os.path.join(path, "td_burger_step_{}.gif".format(step))
-                pde.build_gif(tmp_filenames, outfile=gif_out)
+            else:
+                plt.figure()
+                # pdb.set_trace()
+                trainer_util.compare_plots_with_ground_truth(
+                    (optimizer.target, inner_lrs),
+                    pde,
+                    fenics_functions,
+                    gt_params,
+                    get_final_model,
+                    maml_def,
+                    FLAGS.inner_steps,
+                )
+
+            if FLAGS.expt_name is not None:
+                plt.savefig(os.path.join(path, "viz_step_{}.png".format(step)), dpi=800)
+
+            if tflogger is not None:
+                tflogger.log_plots("Ground truth comparison", [plt.gcf()], step)
 
             # save model
-            with open(os.path.join(path, "maml_step_{}.txt".format(step)), "w") as f:
-                f.write(optimizer_target_prev)
+            optimizer_target = flax.serialization.to_state_dict(optimizer.target)
+            inner_lrs_target = flax.serialization.to_state_dict(inner_lr_get(inner_lr_state))
+            with open(os.path.join(path, "model_step_{}.pickle".format(step)), "wb") as f:
+                pickle.dump([optimizer_target, inner_lrs_target], f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    #if FLAGS.expt_name is not None:
-    #    outfile.close()
+    # if FLAGS.expt_name is not None:
+    #     outfile.close()
 
     plt.figure()
-    trainer_util.compare_plots_with_ground_truth(
-        (optimizer_target_prev, inner_lrs),
-        pde,
-        fenics_functions,
-        gt_params,
-        get_final_model,
-        maml_def,
-        FLAGS.inner_steps,
-    )
-    if FLAGS.expt_name is not None:
-        plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
-    else:
-        plt.show()
-
     if FLAGS.pde == 'td_burgers':
-        tmp_filenames = trainer_util.plot_model_time_series(
-            (optimizer_target_prev, inner_lrs),
+        trainer_util.plot_model_time_series_new(
+            (optimizer_target, inner_lrs),
             pde,
             fenics_functions,
             gt_params,
@@ -526,8 +455,20 @@ def main(arvg):
             maml_def,
             FLAGS.inner_steps,
         )
-        gif_out = os.path.join(path, "td_burger_final.gif".format(step))
-        pde.build_gif(tmp_filenames, outfile=gif_out)
+    else:
+        trainer_util.compare_plots_with_ground_truth(
+            (optimizer_target, inner_lrs),
+            pde,
+            fenics_functions,
+            gt_params,
+            get_final_model,
+            maml_def,
+            FLAGS.inner_steps,
+        )
+    if FLAGS.expt_name is not None:
+        plt.savefig(os.path.join(path, "viz_final.png"), dpi=800)
+    else:
+        plt.show()
 
 
 if __name__ == "__main__":

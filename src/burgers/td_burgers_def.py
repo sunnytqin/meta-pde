@@ -3,9 +3,9 @@
 Stuff exposed via importing this module should have the same names as stuff exposed
 by importing any other pde_def"""
 
-from ..nets.field import make_nf_ndim, DivFreeVelocityPressureField, make_res_nf_ndim
+from ..nets.field import make_nf_ndim, NeuralPotential
 
-from .td_burgers_common import (
+from .td_burgers_common_new import (
     sample_params,
     sample_points,
     loss_fn,
@@ -13,11 +13,12 @@ from .td_burgers_common import (
     sample_points_in_domain,
     sample_points_initial,
 )
-from .td_burgers_fenics_exact1 import build_gif
+from .td_burgers_fenics_new import build_gif
 
-from .td_burgers_fenics_exact1 import (solve_fenics, GroundTruth)
+from .td_burgers_fenics_new import (solve_fenics, GroundTruth)
 
-dim = 2
 
-BaseField = make_nf_ndim(dim)
-#BaseField = make_res_nf_ndim(dim)
+dim = 1
+
+BaseField = NeuralPotential
+#BaseField = make_nf_ndim(dim)
