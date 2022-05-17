@@ -13,7 +13,6 @@ from .td_burgers_common_new import (
     sample_points_in_domain,
     sample_points_initial,
 )
-from .td_burgers_fenics_new import build_gif
 
 from .td_burgers_fenics_new import (solve_fenics, GroundTruth)
 
