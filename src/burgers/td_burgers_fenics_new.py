@@ -13,7 +13,6 @@ import argparse
 import jax
 from collections import namedtuple
 import os
-import imageio
 import importlib
 
 from absl import app
@@ -172,16 +171,6 @@ def solve_fenics(params, boundary_points=24, resolution=16):
 
     return GroundTruth(u_list, np.array(t_list))
 
-
-def build_gif(filenames, outfile=None):
-    if outfile is None:
-        outfile = 'td_burgers.gif'
-    with imageio.get_writer(outfile, mode='I') as writer:
-        for f in filenames:
-            image = imageio.imread(f)
-            writer.append_data(image)
-    for f in set(filenames):
-        os.remove(f)
 
 
 def is_defined(xy, u):

@@ -8,7 +8,6 @@ import numpy as npo
 from jax import grad, jit, vmap
 
 from jax.experimental import optimizers
-from adahessianJax import grad_and_hessian
 
 from .nets import maml
 from .get_pde import get_pde

@@ -21,7 +21,6 @@ from functools import partial
 
 import fenics as fa
 import dolfin
-import imageio
 
 from . import jax_tools
 import copy
