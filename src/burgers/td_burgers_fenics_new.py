@@ -132,18 +132,18 @@ def solve_fenics(params, boundary_points=24, resolution=16):
         t_list.append(t)
     print('Time steps solved by fenics', t_list)
 
-    tmp_filenames = []
-    for n in range(FLAGS.num_tsteps):
-        u = u_list[n]
-        fa.plot(u)
-        plt.ylim([-1.2, 3.1])
-        plt.grid(True)
+    #tmp_filenames = []
+    #for n in range(FLAGS.num_tsteps):
+    #    u = u_list[n]
+    #    fa.plot(u)
+    #    plt.ylim([-1.2, 3.1])
+    #    plt.grid(True)
 
-        plt.title('Ground Truth \n t = {:.2f}'.format(t_list[n]))
-        plt.savefig('td_burger_' + str(n))
-        plt.close()
-        tmp_filenames.append('td_burger_' + str(n) + '.png')
-    build_gif(tmp_filenames)
+    #    plt.title('Ground Truth \n t = {:.2f}'.format(t_list[n]))
+    #    plt.savefig('td_burger_' + str(n))
+    #    plt.close()
+    #    tmp_filenames.append('td_burger_' + str(n) + '.png')
+    #build_gif(tmp_filenames)
 
     #results_array = []
     #x_coord = np.linspace(FLAGS.xmin, FLAGS.xmax, 500)
@@ -157,17 +157,17 @@ def solve_fenics(params, boundary_points=24, resolution=16):
     #plt.imshow(results_array.T, cmap='hot', interpolation='nearest', aspect='auto')
     #plt.show()
 
-    tmp_filenames = []
-    for n in range(FLAGS.num_tsteps):
-        u = u_list[n]
-        fa.plot(u.dx(0))
-        plt.grid(True)
+    #tmp_filenames = []
+    #for n in range(FLAGS.num_tsteps):
+    #    u = u_list[n]
+    #    fa.plot(u.dx(0))
+    #    plt.grid(True)
 
-        plt.title('Ground Truth \n t = {:.2f}'.format(t_list[n]))
-        plt.savefig('td_burger_derivative' + str(n))
-        plt.close()
-        tmp_filenames.append('td_burger_derivative' + str(n) + '.png')
-    build_gif(tmp_filenames, 'td_burger_derivative.gif')
+    #    plt.title('Ground Truth \n t = {:.2f}'.format(t_list[n]))
+    #    plt.savefig('td_burger_derivative' + str(n))
+    #    plt.close()
+    #    tmp_filenames.append('td_burger_derivative' + str(n) + '.png')
+    #build_gif(tmp_filenames, 'td_burger_derivative.gif')
 
     return GroundTruth(u_list, np.array(t_list))
 
