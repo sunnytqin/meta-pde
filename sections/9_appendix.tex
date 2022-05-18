@@ -1,0 +1,94 @@
+\section{Appendix}
+\label{appdx:hyperelasticity_pde}
+The deformation gradient $F$ is defined as 
+\begin{align*}
+    F \equiv \frac{\partial \bm{x}}{\partial \mathbf{X}} = \frac{\partial}{\partial \mathbf{X}} \left(\mathbf{X} + u\right) = \frac{\partial \mathbf{X}}{\partial \mathbf{X}} + \frac{\partial u}{\partial \mathbf{X}} = \mathbf{I} + \frac{\partial u}{\partial \mathbf{X}}
+\end{align*}
+The constitutive law in continuum mechanics relates Piola-Kirchhoff stress with deformation gradient using the following relations:
+\begin{align*}
+    P = \frac{\partial \psi}{\partial F}
+\end{align*}
+where $\psi$ is the Helmholtz free energy. For Neo-Hookean hyperelasticy material, the energy is given by:
+\begin{align*}
+    \psi = \frac{1}{2}\lambda \left(\log(J)\right)^2 - \mu \log(J) + \frac{\mu}{2} (\mathbf{I}_c - \text{dim}).
+\end{align*}
+In 2-D setting, we set $dim=2$. There are two invariants in the above equation to be defined. The first is $\mathbf{I}_c \equiv tr(C) $ and $C$ is the right Cauchy-Green tensor, defined as $C = F^T F$. The second invariant is  $J \equiv \det (F)$. Substitute the two invariant into the above equation, we simply the first Piola-Kirchohoff stress $P$ into: 
+\begin{align*}
+    P = \frac{\partial \psi(F)}{\partial F} = \mu F \left(\lambda \ln (J) - \mu\right) F^{-T}
+\end{align*}
+In the absence of body and traction forces, the hyper-elastic PDE is written as
+\begin{align*}
+    \nabla_{\mathbf{X}} \cdot P &= 0 \quad \mathbf{X} \in \Omega \\
+    \hat{u} &= g(u) \quad \mathbf{X} \in \Gamma_u \\
+    P \cdot N &= T \quad \mathbf{X} \in \Gamma_T. 
+\end{align*}
+$N$ is the normal vector relative to $X$, the reference vector relative to the the original shape. \\
+The solution $u$ to the Hyper-Elasticity Equation is also the minimizer for the Helmholtz free energy $\Pi$ of the entire system:
+ \begin{align*}
+    u = \text{argmin}_u\ 
+    \Pi(u) = \text{argmin}_u\  \left[\int_{\Omega} \psi \, d\bm{x} -\int_{\Omega} B \cdot u \, d\bm{x} -\int_{\partial \Omega} T \cdot u \, ds\right]
+\end{align*}
+In the problem set-up, both body force and traction force are absent, which leads us to set $B = 0 $ and $T = 0$. The potential energy of the deformed system simplifies to: 
+\begin{align*}
+    \Pi(u) = \int_{\Omega} \psi(u) \, d\bm{x}
+\end{align*}
+
+\subsection{Meta-PDE Details}
+
+%This lets us develop a new, ``functional'' API for surrogate modeling.
+%, which can handle arbitrary geometries and removes the need to fix a mesh or to fix vector bases for the PDE parameters or solution.
+%For a given PDE, our surrogate model takes as input: 
+%\begin{itemize}
+%    \item[(i)] Samplers which can sample points uniformly on each region of the domain.
+%    \item[(ii)] A loss function encoding the PDE constraint or boundary condition for each such region.
+%\end{itemize}
+%Combining these allows estimation of the residual which measures deviation of a given solution field from the governing equations. We use a neural network to model the solution field, and train a neural network initialization to converge quickly across a distribution of tasks; in our case each task in the distribution is minimizing the residual for a PDE or minimizing the variational energy for the PDE with given domain, boundary conditions and governing equations. 
+
+Meta-PDE involves using gradient-based meta-learning to amortize the training time needed to fit each parametrization of a PDE. We focus specifically on two state-of-the-art meta-learning methods: LEAP~\citep{flennerhag2018transferring} and MAML~\citep{finn2017model}. We describe LEAP-based Meta-PDE briefly here. MAML-based Meta-PDE is a straightforward extension and is described in the appendix.
+
+The LEAP-based Meta-PDE method learns the model initialization $\theta^0 \in \mathbb{R}^p$ for a neural network $f_\theta$, which can then be trained to approximate the solution $u: \mathbb{R}^{d_\Omega} \to \mathbb{R}^{d_u}$ of an individual parametrization of the PDE. To learn $\theta^0$, we start with a distribution of tasks, with each task specified by samplers and constraint operators for the boundary and loss. Each task in this distribution represents a different parametrization of the PDE. Then we draw a batch of $n$ tasks with individual loss functions $\hat{\mathcal{L}}_i$, $i \in [n]$. The initialization for each inner task is $\theta^0$, and is updated by the inner gradient update rule. During each inner gradient update, we update the meta-gradient per LEAP algorithm. We unroll the inner learning loop $K$ steps to find $f_{\theta_i^K}$: the solution ansatz for each task $i$ in the batch. After unrolling $K$ update steps for $n$ tasks, we update the learned model initialization $\theta^0$ with the meta-gradient:
+\begin{align}
+    \theta^0 \leftarrow \theta^0 - \beta \nabla_{\theta^0}\sum_{i=1}^n \frac{1}{n} d(\theta^0; M_i),
+\end{align}
+where $d(\theta^0; M_i)$ is the distance of the gradient path for task $i$ on its manifold $M_i$, as specified in \citep{flennerhag2018transferring}.
+
+The MAML-based Meta-PDE method learns the model initialization $\theta^0$ for a neural network $f_\theta$ and also learns the inner gradient update rule. We use SGD as the inner gradient update rule and MAML learns the optimal step size for each parameter in $\theta$ for each inner each step. For each task the loss is $\hat{\mathcal{L}}_i(f_{\theta_K, i})$. We perform backpropagation through the inner loop to find the gradients w.r.t meta-initialization $\theta^0$ and use the gradients to update $\theta^0$ in the outer loop training:
+\begin{align}
+    \theta^0 \leftarrow \theta^0 - \beta \nabla_{\theta^0} \sum_{i=1}^n  \frac{1}{n} \hat{\mathcal{L}}_i(f_{\theta^K _i})
+\end{align}
+We also perform backpropagation through the inner loop to find the gradients w.r.t. the per-step, per-parameter step size $\alpha$ and use the gradients to update the $\alpha$ in the outer loop training:
+\begin{align}
+    {\alpha}  \leftarrow {\alpha} - \beta  \nabla_{\alpha} \sum_{i=1}^n  \frac{1}{n} \hat{\mathcal{L}}_i(f_{\theta^K_i})
+\end{align}
+The Meta-PDE surrogate model is designed to have an input schema as close to this general specification as possible. Most PDEs can be fully defined by specification of:
+\begin{itemize}
+  \item a domain $\Omega$ with boundary $\partial \Omega$,
+  \item an operator $\mathcal{F}$ representing governing equations,
+  \item and an operator $\mathcal{G}$ representing boundary conditions.
+\end{itemize}
+When using Meta-PDE as a surrogate to compute an approximate solution to a given paramterization of the PDE (one task), the inputs to the Meta-PDE model immitate the general. specification above:
+\begin{itemize}
+  \item a sampler $s(\Omega)$ which returns points in the domain $\Omega$,
+  \item a sampler $s(\partial\Omega)$ which returns points on the boundary $\partial\Omega$,
+  \item an operator $\mathcal{F}$ representing governing equations,
+  \item and an operator $\mathcal{G}$ representing boundary conditions.
+\end{itemize}
+The operators $\mathcal{F}$ and $\mathcal{G}$ may be supplied directly and do not require a particular parametric form. The geometric dimension $\mathbb{R}^{d_\Omega}$ and solution dimension $\mathbb{R}^{d_u}$ must remain fixed across PDEs in the distribution, even though $\Omega$ is allowed to vary. The samplers and operators are sufficient to construct an estimator $\hat{\mathcal{L}}$ for the task loss $\mathcal{L}$:
+\begin{align}
+  \mathcal{L}(u) &= \int_{\Omega} \big|\big|\mathcal{F}(u)(\bm{x})\big|\big|^2_2 d\bm{x} +
+  \int_{\partial\Omega} \big|\big|\mathcal{G}(u)(x)\big|\big|_2^2 d\bm{x} \\
+  \hat{\mathcal{L}}(u) &= \mathbb{E}_{x \sim s(\Omega)} \big|\big|\mathcal{F}(u)(\bm{x})\big|\big|^2_2 +
+  \mathbb{E}_{\bm{x} \sim s(\partial \Omega)} \big|\big|\mathcal{G}(u)(\bm{x})\big|\big|_2^2
+\end{align}
+$\hat{\mathcal{L}}(f)$ is unbiased as long as $s(\cdot)$ return points with uniform probability over their supports, or return batches of points which have uniform probability for any given $x$ aggregated over the batch. Unbiased estimation is not necessarily essential. Note $\hat{\mathcal{L}}(f) > 0$ and $\mathcal{L}(f) > 0$ $\forall f$, and the true solution $u$ of the PDE achieves $\mathcal{L}(u) = \hat{\mathcal{L}}(u) = 0$. These properties hold if we multiply the integrand in $\mathcal{L}(f)$ by an arbitrary density $\mu > 0$ or if we choose samplers $s$ which have full support but nonuniform probability on $\Omega$ or $\partial \Omega$. Therefore, biased sampling will not change the minimizer of the energy estimator if we have a sufficiently expressive hypothesis class for $f$.
+
+%The user must supply a sampler for the domain and for the boundary of each PDE within the training distribution and for each PDE seen during deployment. A sampler can easily be constructed for any domain for which we have a mesh, but it is also often easier to construct a sampler than to construct an accurate mesh.
+During deployment time, a "forward pass" computes an approximate solution for a given PDE parametrization with $K$ steps of stochastic optimization steps. The $K$ gradient steps minimize the residual for the task $\mathcal{L}(f)$. If the model has been trained with LEAP-based Meta-PDE method, it will start from the meta-learned model initialization $\theta_0$. If the model has been trained with MAML-based Meta-PDE method, it will start from the meta-learned model initialization $\theta_0$ and the step size $\alpha$ will be also be specified for each parameter and each step: 
+\begin{align}
+  \theta^k = \theta^{k-1} - \alpha \nabla_{\theta^{k-1}} \hat{\mathcal{L}}(f_{\theta^{k-1}}) \quad k = 1 .. K
+\end{align}
+In both cases, the Meta-PDE method returns the approximate solution $f_{\theta^K}$, the neural network with the final set of parameters. One could further fine tune the model beyond $K$ gradient steps to achieve higher solution accuracy at the cost of longer solving time. 
+
+Finite element analysis methods usually use piecewise linear meshes, which can take many elements to accurately represent curved shapes: even when using piecewise polynomially-shaped meshes, the slow rate of convergence of using these meshes to approximate non-polynomial geometry can be a major source of error and/or computational expense for FEA. In the next section, we will further explore the accuracy/time trade-off for Meta-PDE during deployment, and compare it with the accuracy/time trade-off for FEA methods. 
+
+%Given an inside-outside oracle for the domain, it is easy to use rejection sampling to sample from it exactly. Most parametric geometry representations such as those used in computer-aided design also allow exact sampling of the boundary, and even minimal representations such as signed distance functions allow approximate sampling \citep{brubaker2012family}.

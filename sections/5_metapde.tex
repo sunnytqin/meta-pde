@@ -26,22 +26,23 @@ In both cases $\mathcal{N}$ is an operator that involves $u$ and the partial der
 %\end{figure} \\
 \subsection{Physics-Informed Neural Networks (PINN)}
 The goal of a PINN is to represent the solution ansatz $u(\bm{x},t)$ with a neural network $f_\theta(\bm{x},t)$. 
-Doing so requires learning $\theta$ such that $f_\theta$ approximates the solution to the PDE over the problem domain.
+Doing so requires learning $\theta \in \mathbb{R}^p$ such that $f_\theta$ approximates the solution to the PDE over the problem domain.
 Learning these parameters is an optimization problem, which requires defining a loss function whose minimum is the solution of the PDE.
 %In the original proposal, PINNs can not only incorporate the standard "supervised" data loss, but also a physics-informed loss. 
 %The standard supervised loss requires knowing the ground truth solution evaluated at sample points. 
 %This "supervised" data loss is useful when experimental data is available. 
 %The physics-informed loss consists of the residual of the differential equation. 
 %Therefore, one way to incorporate the is to minimize the residual when using $f_\theta$ as the ansatz to the PDE solution $u$. 
-We choose a `physics-informed loss' which consists of the residual of the differential equation over the problem domain and boundary. For time-independent PDEs, this loss function is
-\begin{align}\label{eq:pinn_loss_function}
-  \mathcal{J}(u) &= \int_{\Omega} \left|\left| \mathcal{N}(u)(\bm{x})\right|\right|^2_2 \, dx + \int_{\partial\Omega} \left|\left| \mathcal{G}(u)(\bm{x})\right|\right| _2^2 \, dx.
-\end{align}
-For time-dependent PDEs, this loss function is: 
-\begin{align}\label{eq:pinn_loss_function}
-  \mathcal{J}(u) = & \int_{\Omega} \left|\left| \frac{\partial}{\partial t}u(\bm{x}, t) + \mathcal{N}(u)(\bm{x}, t)\right|\right|^2_2 \, dx + \\
-  & \int_{\partial\Omega} \left|\left| \mathcal{G}(u)(\bm{x}, t)\right|\right| _2^2 \, dx + \int_{\Omega} \left|\left| u(\bm{x}, 0) - \bar{u}_0(\bm{x}) \right|\right| _2^2 \, dx .
-\end{align}
+We choose a `physics-informed loss' which consists of the residual of the differential equation over the problem domain and boundary. Analytically, the residual should be integrated over the problem domain to compute the residual from satisfying the governing equation, and the initial condition and integrated over the boundary domain to compute the residual from satisfying the boundary conditions.
+%For time-independent PDEs, this loss function is
+%\begin{align}\label{eq:pinn_loss_function}
+%  \mathcal{J}(u) &= \int_{\Omega} \left|\left| \mathcal{N}(u)(\bm{x})\right|\right|^2_2 \, dx + \int_{\partial\Omega} \left|\left| \mathcal{G}(u)(\bm{x})\right|\right| _2^2 \, dx.
+%\end{align}
+%For time-dependent PDEs, this loss function is: 
+%\begin{align}\label{eq:pinn_loss_function}
+%  \mathcal{J}(u) = & \int_{\Omega} \left|\left| \frac{\partial}{\partial t}u(\bm{x}, t) + \mathcal{N}(u)(\bm{x}, t)\right|\right|^2_2 \, dx + \\
+%  & \int_{\partial\Omega} \left|\left| \mathcal{G}(u)(\bm{x}, t)\right|\right| _2^2 \, dx + \int_{\Omega} \left|\left| u(\bm{x}, 0) - \bar{u}_0(\bm{x}) \right|\right| _2^2 \, dx .
+%\end{align}
 During training, we randomly sample collocation points from the PDE domain $\Omega$ and boundary $\partial \Omega$ and use these points $\mathcal{C} \in \Omega$ and $\partial \mathcal{C} \in \partial \Omega$ to approximate the differential equation residual. For time-independent PDEs, the training loss is
 \begin{align}\label{eq:pinn_training_loss}
     \mathcal{L}_{\text{PINN}}(f_\theta) = \frac{1}{|\mathcal{C}|} \sum_{\bm{x} \in \mathcal{C}} \left|\left| \mathcal{N} (f_{\theta})(\bm{x}) \right|\right|_2^2  + \frac{1}{|\partial \mathcal{C}|}  \sum_{{\bm{x} \in \mathcal{\partial \mathcal{C}}} } \left|\left|\mathcal{G}(f_{\theta})(\bm{x})\right|\right|_2^2.
@@ -57,42 +58,23 @@ When the training converges, we expect $f_{\theta}$ to approximately satisfy the
 
 \subsection{Meta-PDE Method}
 
-This lets us develop a new, ``functional'' API for surrogate modeling.
+%This lets us develop a new, ``functional'' API for surrogate modeling.
 %, which can handle arbitrary geometries and removes the need to fix a mesh or to fix vector bases for the PDE parameters or solution.
-For a given PDE, our surrogate model takes as input: 
-\begin{itemize}
-    \item[(i)] Samplers which can sample points uniformly on each region of the domain.
-    \item[(ii)] A loss function encoding the PDE constraint or boundary condition for each such region.
-\end{itemize}
-Combining these allows estimation of the residual which measures deviation of a given solution field from the governing equations. We use a neural network to model the solution field, and train a neural network initialization to converge quickly across a distribution of tasks; in our case each task in the distribution is minimizing the residual for a PDE or minimizing the variational energy for the PDE with given domain, boundary conditions and governing equations. 
+%For a given PDE, our surrogate model takes as input: 
+%\begin{itemize}
+%    \item[(i)] Samplers which can sample points uniformly on each region of the domain.
+%    \item[(ii)] A loss function encoding the PDE constraint or boundary condition for each such region.
+%\end{itemize}
+%Combining these allows estimation of the residual which measures deviation of a given solution field from the governing equations. We use a neural network to model the solution field, and train a neural network initialization to converge quickly across a distribution of tasks; in our case each task in the distribution is minimizing the residual for a PDE or minimizing the variational energy for the PDE with given domain, boundary conditions and governing equations. 
 
-In this work, we use gradient-based meta-learning to amortize the training time needed to fit each parametrization of the PDE. The LEAP-based Meta-PDE method learns the model initialization $\theta^0$ for a neural network $f_\theta$. $f_\theta$ can be trained to approximate the solution $u: \mathbb{R}^{d_\Omega} \to \mathbb{R}^{d_u}$ of an individual parametrization of the PDE. To learn $\theta^0$, we start with a distribution of tasks, with each task specified by samplers and constraint operators for the boundary and loss. Each task in this distribution represents a different parametrization of the PDE. Then we draw a batch of $n$ tasks with individual loss functions $\hat{\mathcal{L}}_i$, $i \in [n]$. The initialization for each inner task is $\theta^0$, and is updated by the inner gradient update rule. During each inner gradient update, we update the meta-gradient per LEAP algorithm. We unroll the inner learning loop $K$ steps to find $f_{\theta_i^K}$: the solution ansatz for each task $i$ in the batch. After unrolling $K$ update steps for $n$ tasks, we update the learned model initialization $\theta^0$ with the meta-gradient:
-\begin{align}
-    \theta^0 \leftarrow \theta^0 - \beta \nabla_{\theta^0}\sum_{i=1}^n \frac{1}{n} d(\theta^0; M_i),
-\end{align}
-where $d(\theta^0; M_i)$ is the distance of the gradient path for task $i$ on its manifold $M_i$, as specified in \citep{flennerhag2018transferring}.
+Meta-PDE involves using gradient-based meta-learning to amortize the training time needed to fit each parametrization of a class of PDEs (a task pool). We focus specifically on two state-of-the-art meta-learning methods: LEAP~\citep{flennerhag2018transferring} and MAML~\citep{finn2017model}. We describe LEAP-based Meta-PDE briefly here. MAML-based Meta-PDE is a straightforward extension and is described in the appendix.
 
-The MAML-based Meta-PDE method learns the model initialization $\theta^0$ for a neural network $f_\theta$ and also learns the inner gradient update rule. We use SGD as the inner gradient update rule and MAML learns the optimal step size for each parameter in $\theta$ for each inner each step. For each task the loss is $\hat{\mathcal{L}}_i(f_{\theta_K, i})$. We perform backpropagation through the inner loop to find the gradients w.r.t meta-initialization $\theta_0$ and use the gradients to update $\theta_0$ in the outer loop training:
-\begin{align}
-    \theta^0 \leftarrow \theta^0 - \beta \nabla_{\theta^0} \sum_{i=1}^n  \frac{1}{n} \hat{\mathcal{L}}_i(f_{\theta^K _i})
-\end{align}
-We also perform backpropagation through the inner loop to find the gradients w.r.t. the per-step, per-parameter step size $\alpha$ and use the gradients to update the $\alpha$ in the outer loop training:
-\begin{align}
-    {\alpha}  \leftarrow {\alpha} - \beta  \nabla_{\alpha} \sum_{i=1}^n  \frac{1}{n} \hat{\mathcal{L}}_i(f_{\theta^K_i})
-\end{align}
-
-The Meta-PDE surrogate model is designed to have an input schema as close to this general specification as possible. Most PDEs can be fully defined by specification of:
+Most PDEs can be fully specified by their domain, boundaries, an operator representing governing equations, and an operator representing boundary conditions. When using Meta-PDE as a surrogate to compute an approximate solution to a given parametrization of the PDE (one task), the inputs to the Meta-PDE model imitate this general specification:
 \begin{itemize}
-  \item a domain $\Omega$ with boundary $\partial \Omega$,
-  \item an operator $\mathcal{F}$ representing governing equations,
-  \item and an operator $\mathcal{G}$ representing boundary conditions.
-\end{itemize}
-When using Meta-PDE as a surrogate to compute an approximate solution to a given paramterization of the PDE (one task), the inputs to the Meta-PDE model immitate the general. specification above:
-\begin{itemize}
-  \item a sampler $s(\Omega)$ which returns points in the domain $\Omega$,
-  \item a sampler $s(\partial\Omega)$ which returns points on the boundary $\partial\Omega$,
-  \item an operator $\mathcal{F}$ representing governing equations,
-  \item and an operator $\mathcal{G}$ representing boundary conditions.
+  \item A sampler $s(\Omega)$ which returns points in the domain $\Omega$,
+  \item A sampler $s(\partial\Omega)$ which returns points on the boundary $\partial\Omega$,
+  \item An operator $\mathcal{F}$ representing governing equations,
+  \item An operator $\mathcal{G}$ representing boundary conditions.
 \end{itemize}
 The operators $\mathcal{F}$ and $\mathcal{G}$ may be supplied directly and do not require a particular parametric form. The geometric dimension $\mathbb{R}^{d_\Omega}$ and solution dimension $\mathbb{R}^{d_u}$ must remain fixed across PDEs in the distribution, even though $\Omega$ is allowed to vary. The samplers and operators are sufficient to construct an estimator $\hat{\mathcal{L}}$ for the task loss $\mathcal{L}$:
 \begin{align}
@@ -101,10 +83,19 @@ The operators $\mathcal{F}$ and $\mathcal{G}$ may be supplied directly and do no
   \hat{\mathcal{L}}(u) &= \mathbb{E}_{x \sim s(\Omega)} \big|\big|\mathcal{F}(u)(\bm{x})\big|\big|^2_2 +
   \mathbb{E}_{\bm{x} \sim s(\partial \Omega)} \big|\big|\mathcal{G}(u)(\bm{x})\big|\big|_2^2
 \end{align}
-$\hat{\mathcal{L}}(f)$ is unbiased as long as $s(\cdot)$ return points with uniform probability over their supports, or return batches of points which have uniform probability for any given $x$ aggregated over the batch. Unbiased estimation is not necessarily essential. Note $\hat{\mathcal{L}}(f) > 0$ and $\mathcal{L}(f) > 0$ $\forall f$, and the true solution $u$ of the PDE achieves $\mathcal{L}(u) = \hat{\mathcal{L}}(u) = 0$. These properties hold if we multiply the integrand in $\mathcal{L}(f)$ by an arbitrary density $\mu > 0$ or if we choose samplers $s$ which have full support but nonuniform probability on $\Omega$ or $\partial \Omega$. Therefore, biased sampling will not change the minimizer of the energy estimator if we have a sufficiently expressive hypothesis class for $f$.
+Although $\hat{\mathcal{L}}(f)$ is unbiased as long as $s(\cdot)$ return points with uniform probability over their supports, note that unbiased estimation is not necessarily essential if we are interested in the case where $\mathcal{L}(f) = \hat{\mathcal{L}}(f) = 0$. Biased sampling will not change the minimizer of the energy estimator if we have a sufficiently expressive hypothesis class for $f$.
+
+%Note $\hat{\mathcal{L}}(f) > 0$ and $\mathcal{L}(f) > 0$ $\forall f$, and the true solution $u$ of the PDE achieves $\mathcal{L}(u) = \hat{\mathcal{L}}(u) = 0$. These properties hold if we multiply the integrand in $\mathcal{L}(f)$ by an arbitrary density $\mu > 0$ or if we choose samplers $s$ which have full support but nonuniform probability on $\Omega$ or $\partial \Omega$. Therefore, biased sampling will not change the minimizer of the energy estimator if we have a sufficiently expressive hypothesis class for $f$.
 
 %The user must supply a sampler for the domain and for the boundary of each PDE within the training distribution and for each PDE seen during deployment. A sampler can easily be constructed for any domain for which we have a mesh, but it is also often easier to construct a sampler than to construct an accurate mesh.
-During deployment time, a "forward pass" computes an approximate solution for a given PDE parametrization with $K$ steps of stochastic optimization steps. The $K$ gradient steps minimize the residual for the task $\mathcal{L}(f)$. If the model has been trained with LEAP-based Meta-PDE method, it will start from the meta-learned model initialization $\theta_0$. If the model has been trained with MAML-based Meta-PDE method, it will start from the meta-learned model initialization $\theta_0$ and the step size $\alpha$ will be also be specified for each parameter and each step: 
+
+The LEAP-based Meta-PDE method learns the model initialization $\theta^0 \in \mathbb{R}^p$ for a neural network $f_\theta$, which can then be trained to approximate the solution $u: \mathbb{R}^{d_\Omega} \to \mathbb{R}^{d_u}$ of an individual parametrization of the PDE. To learn $\theta^0$, we start with a distribution of tasks, where each task represents a different parameterization of the PDE. Each task specified by samplers and constraint operators for the boundary and loss. Then we draw a batch of $n$ tasks with individual loss functions $\hat{\mathcal{L}}_i$, $i \in [n]$. The initialization for each inner task is $\theta^0$, and is updated by the inner gradient update rule. During each inner gradient update, we update the meta-gradient per LEAP algorithm. We unroll the inner learning loop $K$ steps to find $f_{\theta_i^K}$: the solution ansatz for each task $i$ in the batch. After unrolling $K$ update steps for $n$ tasks, we update the learned model initialization $\theta^0$ with the meta-gradient:
+\begin{align}
+    \theta^0 \leftarrow \theta^0 - \beta \nabla_{\theta^0}\sum_{i=1}^n \frac{1}{n} d(\theta^0; M_i),
+\end{align}
+where $d(\theta^0; M_i)$ is the distance of the gradient path for task $i$ on its manifold $M_i$, as specified in \citep{flennerhag2018transferring}. MAML involves a slightly different loss function and also learns step sizes for each parameter.
+
+During deployment time, a ``forward pass'' computes an approximate solution for a given PDE parametrization with $K$ steps of stochastic optimization. The $K$ gradient steps minimize the residual for the task $\mathcal{L}(f)$. If the model has been trained with LEAP-based Meta-PDE method, it will start from the meta-learned model initialization $\theta^0$. If the model has been trained with MAML-based Meta-PDE method, it will start from the meta-learned model initialization $\theta^0$ and the step size $\alpha$ will be also be specified for each parameter and each step: 
 \begin{align}
   \theta^k = \theta^{k-1} - \alpha \nabla_{\theta^{k-1}} \hat{\mathcal{L}}(f_{\theta^{k-1}}) \quad k = 1 .. K
 \end{align}
