@@ -1,0 +1,69 @@
+\newcommand{\reals}{\mathbb{R}}
+\newcommand{\naturals}{\mathbb{N}}
+\newcommand{\complex}{\mathbb{C}}
+\newcommand{\integers}{\mathbb{Z}}
+\newcommand{\identity}{\bm{\mathrm{I}}}
+\newcommand{\trans}{\sf{T}}
+\newcommand{\trace}{\mathrm{tr}}
+\newcommand{\variance}{\mathbb{V}}
+\newcommand{\covariance}{\mathbb{C}}
+\newcommand{\polylog}{\mathrm{Li}}
+\newcommand{\indicator}{\bm{1}}
+\newcommand{\sign}{\mathrm{sgn}}
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\given}{\,|\,}
+
+
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+\newcommand{\set}[1]{\{#1\}}
+
+\newcommand{\red}[1]{\textcolor{red}{#1}}
+
+% https://tex.stackexchange.com/questions/173236/automatically-generate-new-commands
+\newcommand{\generate}[4]{%
+  %#1 = prefix, #2 = macro, #3 = starting point, #4 = end point
+  \def\@tempa{#1} % we don't want to lowercase it
+  \count@=`#3
+  \loop
+  \begingroup\lccode`?=\count@
+  \lowercase{\endgroup\@namedef{\@tempa ?}{#2{?}}}%
+  \ifnum\count@<`#4
+  \advance\count@\@ne
+  \repeat
+}
+
+\generate{mc}{\mathcal}{A}{Z}
+\generate{bold}{\bm}{a}{z}
+\generate{bold}{\bm}{A}{Z}
+\generate{bb}{\mathbb}{A}{Z}
+
+\newcommand{\balpha}{\bm{\alpha}}
+\newcommand{\bbeta}{\bm{\beta}}
+\newcommand{\bepsilon}{\bm{\epsilon}}
+\newcommand{\bgamma}{\bm{\gamma}}
+\newcommand{\bmu}{\bm{\mu}}
+\newcommand{\bpi}{\bm{\pi}}
+\newcommand{\bpsi}{\bm{\psi}}
+\newcommand{\btheta}{\bm{\theta}}
+\newcommand{\bGamma}{\bm{\Gamma}}
+\newcommand{\bLambda}{\bm{\Lambda}}
+\newcommand{\bOmega}{\bm{\Omega}}
+\newcommand{\bPhi}{\bm{\Phi}}
+\newcommand{\bSigma}{\bm{\Sigma}}
+
+
+\renewcommand{\arccos}{\mathrm{cos}^{-1}}
+\newcommand{\distNorm}{\mathcal{N}}
+\newcommand{\distPoisson}{\textrm{Poisson}}
+\newcommand{\distUniform}{\mathcal{U}}
+\newcommand{\distExponential}{\textrm{Exp}}
+\newcommand{\distGamma}{\textrm{Gamma}}
+\newcommand{\distCauchy}{\textrm{Cauchy}}
+
+\newcommand{\pd}[1]{\frac{\partial}{\partial #1}}
+
+\newtheorem{definition}{Definition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{example}{Example}
