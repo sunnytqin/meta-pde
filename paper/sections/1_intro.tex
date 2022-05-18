@@ -1,0 +1,97 @@
+\section{Introduction}
+\label{sec:metapde-intro}
+% Old paragraph 1 (Nicks edit)
+%Partial differential equations (PDEs) can be used to model many physical, biological, and mathematical systems, including those governing thermodynamics, continuum mechanics, and electromagnetism, as well as in applications such as modeling populations, traffic, optimality of continuous control, and financial markets.
+%Analytical solutions are rarely available for PDEs of practical importance;  thus, computational methods to approximate PDE solutions are critical for many problems in science and engineering.
+
+% New paragraph 1
+Partial differential equations (PDEs) can be used to model many physical, biological, and mathematical systems. Such systems include those governing thermodynamics, continuum mechanics, and electromagnetism. Applications of PDEs outside science include modeling of traffic, populations, optimality of continuous control, and finance.
+Analytical solutions are rarely available for PDEs of practical importance; thus, computational methods must be used to find approximate solutions.
+
+% Old paragraph 2
+%One of the most widely used approximations methods is finite element analysis (FEA), in which the continuous problem is discretized and the solution is represented by a piecewise polynomial on a mesh.
+%Solving PDEs with FEA can be computationally prohibitive, however, particularly when the problem geometry requires use of a fine mesh, as the size of the system to be solved grows proportional to the number of mesh cells.
+%This computational expense is exacerbated in problems such as parameter identification or design optimization, as in these settings the PDE must be solved at each step of an optimization problem.
+%Each of these problems is related, but often with varied boundary conditions, geometry, or parameters of the governing equations.
+%Notably, this situation is different than common deep learning optimization problems in which the gradients of the loss dominate the computational expense of optimization.
+%In PDE-constrained optimization, the \emph{adjoint method} \citep{lions1971optimal,mitusch2019dolfin} may be used to obtain the gradient of an objective computed from the solution with respect to the PDE parameters with cost equivalent to a single solve of the \emph{linearized} PDE.
+%Thus the key bottleneck to optimization of PDE parameters is often the ``forward pass'' of obtaining an accurate solution rather than the ``backward pass'' for obtaining a gradient.
+
+% New paragraph 2
+One of the most widely used approximations methods is finite element analysis (FEA).
+In FEA, the continuous problem is discretized and the solution is represented by a piecewise polynomial on a mesh.
+Solving PDEs with FEA can be computationally prohibitive, particularly when the problem geometry requires a fine mesh as the size of the system to be solved grows proportional to the number of mesh cells.
+The main purpose of this paper is to use gradient-based meta-learning to accelerate physics-informed neural networks (PINNs).
+This results in solvers that can achieve accurate solutions at reduced computational cost relative to FEA.
+Although these solvers have an initial training cost, they may provide computational savings in problems where a PDE must be solved repeatedly.
+Such problems could include parameter identification, design optimization, or in the solution of coupled time-dependent PDEs where, e.g., an elliptic equation is solved at each timestep.
+
+
+%\textbf{Surrogate Modeling} Surrogate modeling for PDEs typically involves fitting a model to map from PDE parameters in a vector basis to coefficients of an approximate solution in another vector basis. The model is trained on a distribution of PDEs to correctly predict their solution or to satisfy the associated PDE constraints. These bases are fixed across the class of problems to be amortized. However, different problems may require different meshes to represent the solution, source terms, or boundary conditions, or may demand different representations for the geometry itself. Even generating a mesh which can adequately represent the geometry and solution of a single problem can be difficult. Surrogate modeling approaches are usually therefore restricted to scenarios where we can fix a mesh or at least represent geometry, parameters, and solution with fixed coefficient vectors.\\
+
+% Old paragraph on PINNS
+%Physics-informed neural networks (PINNs) are supervised deep learning models that use neural networks as the ansatz of the solution function for PDEs.
+%The idea was popularized by \citet{raissi2019physics}, and has been widely researched since.
+%The key advantage of PINNs over traditional numerical solvers is that the PINN is able to provide a solution without the need to discretize the problem domain; the learned PDE solution is mesh-free.
+%Traditional numerical solvers such as finite difference and finite element methods involve a potentially challenging discretization step, and the accuracy of the solution depends on the granularity of the mesh. These problems are worse when dealing with complex geometries. 
+%PINNs also allow the blending of a ``supervised'' data-based loss in additional to the physics-informed loss, which is helpful when the data does not come in a form amenable to being imposed as boundary conditions \citep{raissi2019physics}.
+%However, it can be costly to train a PINN to an accuracy that is competitive with traditional PDE solvers.
+%Moreover, because PINNs fit the solution to a single parameterization of the PDE, for any given new instance it requires starting from scratch \citep{raissi2019physics, de2021hyperpinn}.
+%In this work, we attempt to address this performance issue by applying meta-learning to partially amortize the cost of training and thereby reduce the time required to find an accurate solution to a particular PDE problem instance.
+
+% New paragraph on PINNs
+YouPINNs use a neural network (NN) to represent the solution ansatz of a PDE.
+%As a result, solving a PDE involves optimizing a NN.
+The idea was popularized by \citet{raissi2019physics}, and has been widely researched since.
+The key advantage of PINNs over traditional numerical solvers is that the PINN is able to provide a solution without the need to discretize the problem domain; the learned PDE solution is mesh-free.
+However, PINNs suffer from two major issues that limit their utility as forward solvers \citep{perdikaris2022respectingcausality}.
+First, PINNs have not demonstrated the ability to solve all PDEs. In particular, PINNs tend to struggle to solve time-dependent PDEs whose solutions exhibit chaotic behavior or turbulent flow.
+Second, PINNs tend to be dramatically slower than classic numerical methods.
+We attempt to mitigate this second issue by applying meta-learning to partially amortize the cost of optimization, thereby reducing the time required to find an accurate solution on a particular problem.
+
+
+% Old paragraph on meta-learning
+
+%The need to solve a related \emph{collection} of PDEs motivates a meta-learning approach in which the different PDEs are treated as the tasks.
+%Recent work in meta-learning has focused on how to construct learning algorithms can adapt to a new task with as little additional training as possible.
+%The state-of-art meta-learning algorithms such as MAML \citep{finn2017model}, Reptile \citep{nichol2018first}, and LEAP \citep{flennerhag2018transferring}, view meta-learning as a bi-level optimization problem: the inner learning loop optimizes the model parameters against a given task, and the outer learning loop optimizes inner loop's learning process against the pool of tasks that the inner loop might encounter.
+%In other words, the outer loop optimizes the model meta-parameters and initialization such that only a few gradient steps are necessary to achieve strong performance on a novel task.
+%One often refer to the outer-loop's learning objective as the ``meta-learning objective.''
+%We use LEAP and MAML as our main meta-learning frameworks.
+%In our LEAP-based meta-PDE framework, our model objective is to learn an initialization that can then be trained to solve particular instances of PDEs.
+%In our MAML-based Meta-PDE framework, in addition to the model initialization, we also learn the optimal step size for each inner-loop step and each parameter.
+%The MAML framework's objective is to minimize the expected final loss over all potential inner tasks, while LEAP's objective is to minimize the expected path length from initial to final parameters for all tasks in the task pool.
+
+% New paragraph on meta-learning
+To motivate the use of meta-learning, we recognize that for PINNs forward solving requires optimization (i.e., learning); thus to accelerate forward solving we need to accelerate learning. 
+Recent work in meta-learning has focused on how to construct learning algorithms that can adapt to a new task with as little additional training as possible.
+We focus on gradient-based meta learning such as MAML \citep{finn2017model}, Reptile \citep{nichol2018first}, and LEAP \citep{flennerhag2018transferring}. These algorithms view meta-learning as a bi-level optimization problem: the inner learning loop optimizes the model parameters against a given task, and the outer learning loop optimizes the inner loop's learning process against the pool of tasks that the inner loop might encounter. When we apply meta-learning to PINNs, our outer loop optimizes NN initialization and model meta-parameters such that only a few gradient steps are necessary to achieve strong performance on a novel task.
+%associates the training of each inner-loop task with a manifold.
+%On the task manifold, the training process traces a trajectory from the model initialization (i.e., one that is shared among all inner-loop tasks) to the final parameters (i.e., one that is unique to each inner-loop task).
+%The meta-learning objective for LEAP is to minimize the expected length of this path for all possible tasks in the meta-learning task pool. 
+
+We call our proposed meta-learning framework Meta-PDE. The goal of Meta-PDE is to reduce the computation time needed to train PINNs by leveraging meta-learning to partially amortize training.
+%To reduce the computation time needed to train PINNs, we propose Meta-PDE -- a framework that leverages meta-learning to partially amortize training and reduce the time needed to find PINN solutions.
+We use LEAP and MAML as our meta-learning frameworks.
+During training time, Meta-PDE is trained on a pool of predefined tasks.
+The task pool consists of different parameterizations of the PDE, such as different boundary conditions, initial conditions, the coefficients in the governing equation, or even the problem domain of the PDE.
+During deployment, the meta-learned model can be used to produce fast solutions to any instances of PDEs in the task pool.
+%The meta-learning step allows users to amortize and thus accelerate fitting neural networks to satisfy PDE constraints during deployment.
+Our scheme has several important properties:
+\begin{itemize}
+    \item Training does not require supervised data provided by PDE solvers. Training instead requires meta-training PINNs on a given pool of problems.
+    \item Meta-PDE can be used on any PDE in the form of \cref{eq:metapde-time-strongform} or \cref{eq:metapde-space-strongform}, with arbitrary geometry, and with any boundary conditions in the form of \cref{eq:metapde-time-bc} or \cref{eq:metapde-space-bc}.
+    \item Geometry, boundary conditions, and even the PDE are free to vary as long as the user can supply an appropriate sampler or loss function.
+\end{itemize}
+%Our Meta-PDE model provides a potential way to train a neural network to satisfy a PDE with competitive or faster speed to finite element analysis.
+
+
+%\paragraph{Physics-Informed Neural Networks}
+
+
+%\paragraph{Meta Learning applied to PINNs}
+
+%The objective of the meta-learner is to learn to quickly generate neural networks to approximate the solution to any PDE from the task pool.
+Previous work has also explored meta-learning for PINNs. In \citet{de2021hyperpinn}, authors used a hyper-network; the meta-learning model fits a large neural network that for each task can generate weights for a small neural network. The small neural network becomes the ansatz to the PDE solution. \citet{penwarden2021physics} proposes using linear combinations of previously solved PDEs from available sample tasks to solve new problems. The meta-learning model learns how to linearly combine sample solutions to solve novel tasks from the task pool. One could further train the solution to better solve the PDE problem.\todo{\small{This paragraph on previous work needs to be edited. I am planning to do so later today. -N}}
+
+%\paragraph{Our Contribution}
