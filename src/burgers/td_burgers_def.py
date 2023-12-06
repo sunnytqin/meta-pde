@@ -5,7 +5,7 @@ by importing any other pde_def"""
 
 from ..nets.field import make_nf_ndim, NeuralPotential
 
-from .td_burgers_common_new import (
+from .td_burgers_common import (
     sample_params,
     sample_points,
     loss_fn,
@@ -14,7 +14,7 @@ from .td_burgers_common_new import (
     sample_points_initial,
 )
 
-from .td_burgers_fenics_new import (solve_fenics, GroundTruth)
+from .td_burgers_fenics import (solve_fenics, GroundTruth)
 
 
 dim = 1

@@ -1,0 +1,8 @@
+#!/bin/bash
+
+cd ..
+nohup python -m src.maml_pde --pde poisson --ground_truth_resolution 16 --xmin -1.0 --xmax 1.0 --ymin -1.0 --ymax 1.0 --siren_omega 30.0 --siren_omega0 30.0 --viz_every 1_000 --log_every 500 --optimizer adam --inner_lr 1.0e-4 --outer_lr 1.0e-5 --inner_steps 5 --measure_grad_norm_every 100 --inner_grad_clip 100. --grad_clip 100. --num_layers 3 --layer_size 64 --bc_weight 1. --outer_steps 500_000 --inner_points 1024 --outer_points 1024 --validation_points 1024 --n_eval 8 --bsize 16 --expt_name default_final &
+
+nohup python -m src.maml_pde --pde td_burgers --max_holes 0 --xmin -0.0 --ymin -0.0 --xmax 1.0 --ymax 1.0 --ground_truth_resolution 512 --max_reynolds 100.0 --num_tsteps 201 --novary_source --viz_every 1_000 --log_every 500 --siren_omega 30.0 --siren_omega0 30.0 --inner_steps 5 --inner_lr 1.0e-4 --outer_lr 1.0e-5 --measure_grad_norm_every 500 --inner_grad_clip 100.0 --grad_clip 100.0 --optimizer adam --num_layers 8 --layer_size 64 --inner_points 1024 --outer_points 1024 --validation_points 1024 --bsize 8 --n_eval 8 --expt_name default_final &
+
+nohup python -m src.maml_pde --pde hyper_elasticity --xmin 0.0 --ymin 0.0 --max_holes 5 --max_hole_size 1.0 --max_reynolds 100. --ground_truth_resolution 32 --relaxation_parameter 0.01 --siren_omega 30.0 --siren_omega0 30.0 --viz_every 1_000 --log_every 500 --optimizer adam --outer_lr 1.0e-5 --inner_lr 1.0e-5 --grad_clip 100. --inner_grad_clip 100. --measure_grad_norm_every 100 --inner_steps 5 --num_layers 8 --layer_size 64 --bc_weight 1.0 --outer_steps 500_000 --inner_points 1024 --outer_points 1024 --validation_points 1024 --n_eval 8 --bsize 8 --novary_bc --novary_source --expt_name default_final &

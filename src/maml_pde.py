@@ -23,7 +23,6 @@ import flax
 from flax import nn
 import fenics as fa
 
-from .util import pcgrad
 from .util.timer import Timer
 
 from .util import jax_tools
@@ -37,8 +36,6 @@ import sys
 import os
 import pickle
 import shutil
-from copy import deepcopy
-from collections import namedtuple
 
 import time
 

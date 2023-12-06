@@ -577,6 +577,19 @@ def vmap_validation_error(
     )
 
 
+@partial(jax.jit, static_argnums=[4])
+def vmap_validation_rollout(
+    model, ground_truth_params, points, ground_truth_vals, make_coef_func
+):
+    key = jax.random.PRNGKey(0)
+    keys = jax.random.split(key, FLAGS.n_eval)
+
+    coefs = vmap(make_coef_func, (0, None, 0, 0))(
+        keys, model, ground_truth_params, points
+    )
+    return coefs
+
+
 def get_optimizer(model_class, init_params):
     if FLAGS.optimizer == "adam":
         optimizer = flax.optim.Adam(learning_rate=FLAGS.outer_lr, beta1=0.9, beta2=0.99).create(

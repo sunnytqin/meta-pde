@@ -49,6 +49,21 @@ flags.DEFINE_boolean("vary_geometry", True, "")
 flags.DEFINE_boolean("vary_ic", True, "")
 flags.DEFINE_string("domain_loss", None, "")
 
+flags.DEFINE_float("tmin", 0.0, "PDE initial time")
+flags.DEFINE_float("tmax", 1.0, "PDE final time")
+flags.DEFINE_integer("num_tsteps", 101, "number of time steps for td_burgers")
+flags.DEFINE_integer("sample_tsteps", 64, "number of time steps for td_burgers")
+flags.DEFINE_boolean("sample_time_random", True, "random time sample for NN")
+flags.DEFINE_float("max_reynolds", 100, "Reynolds number scale")
+flags.DEFINE_string("burgers_pde", "default", "types of burgers equation")
+flags.DEFINE_float("xmin", 0.0, "scale on random uniform bc")
+flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
+flags.DEFINE_float("ymin", -1.0, "scale on random uniform bc")
+flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
+flags.DEFINE_integer("max_holes", 12, "scale on random uniform bc")
+flags.DEFINE_float("max_hole_size", 0.4, "scale on random uniform bc")
+
+
 # Seed
 flags.DEFINE_integer("seed", 0, "set random seed")
 

@@ -14,6 +14,7 @@ import argparse
 import jax
 from collections import namedtuple
 import os
+import dolfin
 
 from absl import app
 from absl import flags
@@ -23,23 +24,9 @@ from ..util.trainer_util import read_fenics_solution, save_fenics_solution
 
 FLAGS = flags.FLAGS
 
-if __name__ == "__main__":
-    flags.DEFINE_float("xmin", 0.0, "scale on random uniform bc")
-    flags.DEFINE_float("xmax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_float("ymin", 0.0, "scale on random uniform bc")
-    flags.DEFINE_float("ymax", 1.0, "scale on random uniform bc")
-    flags.DEFINE_integer("max_holes", 1, "scale on random uniform bc")
-    flags.DEFINE_float("max_hole_size", .2, "scale on random uniform bc")
-    flags.DEFINE_boolean("stokes_nonlinear", False, "if True, make nonlinear")
-
 from .hyper_elasticity_common import (
-    plot_solution,
-    loss_fn,
-    SecondOrderTaylorLookup,
-    error_on_coords,
     sample_params,
     sample_points,
-    is_in_hole,
 )
 
 
@@ -131,22 +118,6 @@ def solve_fenics(params, boundary_points=64, resolution=16):
     #E, nu = 10.0, 0.3
     #mu, lmbda = fa.Constant(E / (2 * (1 + nu))), fa.Constant(E * nu / ((1 + nu) * (1 - 2 * nu)))
 
-    reuse = False
-    if reuse:
-        # generate cache data
-        cache = {
-            "hparams": (resolution,
-                        FLAGS.xmin, FLAGS.xmax,
-                        FLAGS.ymin, FLAGS.ymax,
-                        poisson_ratio, top_disp,
-                        body_force),
-            "params": params,
-            "pde": "hyper_elasticity",
-        }
-
-        solved = read_fenics_solution(cache, u)
-        if solved:
-            return u
 
     # Stored strain energy density (compressible neo-Hookean model)
     psi = (shear_mod / 2) * (Jinv * Ic - d) + (bulk_mod / 2) * (J - 1) ** 2

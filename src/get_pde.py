@@ -1,10 +1,6 @@
 from absl import flags
 from .poisson import poisson_def
-from .stokes import stokes_def
-from .stokes import pfreestokes_def
-#from .burgers import burgers_def
 from .burgers import td_burgers_def
-from .elasticity import elasticity_def
 from .elasticity import hyper_elasticity_def
 
 
@@ -19,25 +15,6 @@ def get_pde(pde_name):
     elif pde_name == "td_burgers":
         FLAGS.domain_loss = ["loss_domain", "loss_initial"]
         return td_burgers_def
-
-    elif pde_name == "linear_stokes":
-        FLAGS.stokes_nonlinear = False
-        FLAGS.domain_loss = "loss_stress"
-        return stokes_def
-
-    elif pde_name == 'pressurefree_stokes':
-        FLAGS.stokes_nonlinear = False
-        FLAGS.domain_loss = "loss_stress"
-        return pfreestokes_def
-
-    elif pde_name == "nonlinear_stokes":
-        FLAGS.stokes_nonlinear = True
-        FLAGS.domain_loss = ["loss_stress"]
-        return stokes_def
-
-    elif pde_name == "elasticity":
-        FLAGS.domain_loss = "loss_domain"
-        return elasticity_def
 
     elif pde_name == "hyper_elasticity":
         FLAGS.domain_loss = "loss_domain"

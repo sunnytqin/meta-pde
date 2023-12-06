@@ -17,7 +17,6 @@ import flax
 from flax import nn
 import fenics as fa
 
-from .util import pcgrad
 from .util.timer import Timer
 
 from .util import jax_tools
@@ -175,7 +174,7 @@ def main(argv):
     def validation_losses(model):
         return task_loss_fn(jax.random.PRNGKey(0), model)[0]
 
-    @jax.jit
+    #@jax.jit
     def maml_step(key, optimizer):
         # MAML specifics: Per param per step lrs
         make_inner_opt = flax.optim.Momentum(learning_rate=1.0e-4, beta=0.0).create
@@ -213,17 +212,18 @@ def main(argv):
                 initial_model=optimizer.target,
                 inner_loss_fn=task_loss_fn,
                 inner_lrs=inner_lrs,
-            )  
-        
-        log(
+            )
+
+        for i, loss in enumerate(losses):
+            log(
                 "step: {}, loss: {}, val_loss: {}, val_mse: {}, "
                 "val_rel_err: {}, val_rel_err_std: {}, val_true_norms: {}, "
                 "per_dim_rel_err: {}, deployment_time: {}, grad_norm: {}, "
                 "per_time_step_error: {} ,per train step time: {}".format(
-                    -1,
+                    i,
                     0.0,
                     0.0,
-                    0.0,
+                    loss,
                     0.0,
                     0.0,
                     0.0,
@@ -232,8 +232,8 @@ def main(argv):
                     0.0,
                     0.0,
                     t.interval,
+                    )
                 )
-            )
 
         optimizer = trainer_util.get_optimizer(Field, final_model.params)
         #optimizer, loss, loss_aux, grad_norm = train_step(k2, optimizer)
@@ -298,13 +298,13 @@ def main(argv):
     time_last_log = time.time()
     key, subkey = jax.random.split(key)
     optimizer = maml_step(subkey, optimizer_dummy)
+    optimizer, loss, loss_aux, grad_norm = train_step(subkey, optimizer)
 
-
-    for step in range(FLAGS.outer_steps + 1):
+    for step in range(5, FLAGS.outer_steps+1):
         key, subkey = jax.random.split(key)
         with Timer() as t:
             optimizer, loss, loss_aux, grad_norm = train_step(subkey, optimizer)
-
+        loss.block_until_ready()
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
         # points; plotting the losses at those points.

@@ -17,7 +17,6 @@ import flax
 from flax import nn
 import fenics as fa
 
-from .util import pcgrad
 from .util.timer import Timer
 
 from .util import jax_tools
@@ -143,10 +142,7 @@ def main(argv):
             batch_grad
         )
 
-        if FLAGS.optimizer == "adahessian":
-            optimizer = optimizer.apply_gradient(batch_grad, batch_hess)
-        else:
-            optimizer = optimizer.apply_gradient(batch_grad)
+        optimizer = optimizer.apply_gradient(batch_grad)
 
         return optimizer, loss, loss_aux, grad_norm
 
@@ -219,6 +215,7 @@ def main(argv):
         key, subkey = jax.random.split(key)
         with Timer() as t:
             optimizer, loss, loss_aux, grad_norm = train_step(subkey, optimizer)
+            loss.block_until_ready()
 
         # ---- This big section is logging a bunch of debug stats
         # loss grad norms; plotting the sampled points; plotting the vals at those
@@ -386,11 +383,15 @@ def main(argv):
 
         if step % FLAGS.log_every == 0:
             with Timer() as deploy_timer:
-                mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = trainer_util.vmap_validation_error(
+                coefs = trainer_util.vmap_validation_rollout(
                     optimizer.target, gt_params, coords, fenics_vals, make_coef_func
                 )
-                mse.block_until_ready()
+                coefs.block_until_ready()
             deployment_time = deploy_timer.interval / FLAGS.n_eval
+
+            mse, norms, rel_err, per_dim_rel_err, rel_err_std, t_rel_sq_err = trainer_util.vmap_validation_error(
+                optimizer.target, gt_params, coords, fenics_vals, make_coef_func
+            )
 
             val_loss = validation_losses(optimizer.target)
 
@@ -506,8 +507,6 @@ def main(argv):
                 pickle.dump(optimizer_target, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-    #if FLAGS.expt_name is not None:
-    #    outfile.close()
 
 if __name__ == "__main__":
     app.run(main)

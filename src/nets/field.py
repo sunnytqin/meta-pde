@@ -181,11 +181,7 @@ def nf_apply(
 
     for i, size in enumerate(sizes):
         a = flax.nn.Dense(x, size, kernel_init=first_init if i == 0 else kernel_init)
-        if use_laaf:
-            x = laaf(a)
-        elif use_nlaaf:
-            x = nlaaf(a)
-        elif nonlinearity == np.sin:
+        if nonlinearity == np.sin:
             # omega0 in siren, hacked so we can choose to only do it on first layer
             x = nonlinearity(a * omega)
         else:
@@ -238,52 +234,6 @@ def make_res_nf_ndim(n_dims):
 
     return HigherDimNeuralField
 
-
-class DivFreeVelocityPressureField(nn.Module):
-    def apply(
-        self, x, *args, **kwargs,
-    ):
-        x_shape = x.shape
-        x = x.reshape(-1, 2)
-
-        base_field = NeuralField2d.shared(**kwargs)
-
-        def phi_and_p_fn(x_):
-            phi_p = base_field(x_)
-            return np.sum(phi_p[:, 0]), phi_p[:, 1]
-
-        gradphi, pressure = jax.grad(phi_and_p_fn, has_aux=True)(x)
-
-        vel_x = gradphi[:, 1]
-        vel_y = -gradphi[:, 0]
-
-        return np.stack((vel_x, vel_y, pressure), axis=1).reshape((*x_shape[:-1], 3))
-
-
-class DivFreeVelocityPressureSeparateField(nn.Module):
-    def apply(
-            self, x, *args, **kwargs,
-    ):
-        x_shape = x.shape
-        x = x.reshape(-1, 2)
-
-        base_velocity_field = NeuralField1d.shared(**kwargs)
-
-        def phi_fn(x_):
-            phi_p = base_velocity_field(x_)
-            return np.sum(phi_p)
-
-        gradphi = jax.grad(phi_fn, has_aux=False)(x)
-
-        vel_x = gradphi[:, 1]
-        vel_y = -gradphi[:, 0]
-
-        base_pressure_field = NeuralField1d.shared(**kwargs)
-        pressure = np.array(base_pressure_field(
-            np.stack((vel_x, vel_y, x[:, 0], x[:, 1]), axis=1).reshape((*x_shape[:-1], 4))
-        )).reshape(vel_x.shape)
-
-        return np.stack((vel_x, vel_y, pressure), axis=1).reshape((*x_shape[:-1], 3))
 
 
 class DivFreeVelocityField(nn.Module):
@@ -373,16 +323,4 @@ class DivFreeField(nn.Module):
 
         return dewhiten(out, mean_y, std_y)
 
-
-class laaf(nn.Module):
-    def apply(self, x):
-        omega_init = constant_init(1.)
-        omega = self.param('omega', (1,), omega_init)
-        return np.sin(omega * x)
-
-class nlaaf(nn.Module):
-    def apply(self, x):
-        omega_init = constant_init(1.)
-        omega = self.param('omega', (x.shape[-1],), omega_init)
-        return np.sin(omega * x)
 

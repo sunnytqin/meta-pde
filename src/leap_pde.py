@@ -20,7 +20,6 @@ import flax
 from flax import nn
 import fenics as fa
 
-from .util import pcgrad
 from .util.timer import Timer
 
 from .util import jax_tools
@@ -28,16 +27,10 @@ from .util import jax_tools
 from .util import trainer_util
 
 import matplotlib.pyplot as plt
-import pdb
-import sys
 import os
 import pickle
-import shutil
-from copy import deepcopy
-from collections import namedtuple
 
 import time
-
 
 from .util import common_flags
 
