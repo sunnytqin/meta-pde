@@ -10,8 +10,8 @@ meta-learning initializations for mesh-free amortization of PDE solving
 
 > [!NOTE]
 > You will likely encounter this error:  
-   `ImportError: /usr/lib/aarch64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.30' not found`  
-   Fix: in command line, type: ``export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<your_path_to_conda_environment>/envs/meta-pde/lib`  
+   `ImportError: /usr/lib/aarch64-linux-gnu/libstdc++.so.6: version 'GLIBCXX_3.4.30' not found`  
+    Fix: in command line, type: `export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<your_path_to_conda_environment>/envs/meta-pde/lib`  
    `your_path_to_conda_environment` is hinted at the end of your error message  
 
 
